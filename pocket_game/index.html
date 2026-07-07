@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>ラクトフェリン ポケット探索ゲーム</title>
+    <link rel="stylesheet" href="styles.css?v=5">
+  </head>
+  <body>
+    <main class="app">
+      <section class="viewer-panel">
+        <div class="topbar">
+          <div>
+            <h1>ラクトフェリン ポケット探索ゲーム</h1>
+            <p>白いsurfaceのくぼみに、カテキンを置いてハマり具合を判定します。</p>
+          </div>
+          <button id="resetButton" type="button">リセット</button>
+        </div>
+        <div class="viewer-wrap">
+          <div id="viewer" aria-label="ラクトフェリンとカテキンの3Dビュー"></div>
+          <div id="interactionLayer" aria-hidden="true"></div>
+        </div>
+      </section>
+
+      <aside class="control-panel">
+        <section>
+          <h2>ミッション</h2>
+          <p class="mission">カテキンは、ラクトフェリンのどのくぼみにハマりそう？</p>
+        </section>
+
+        <section>
+          <h2>操作モード</h2>
+          <div class="mode-grid" role="group" aria-label="操作モード">
+            <button id="viewModeButton" class="mode active" type="button">タンパク質回転</button>
+            <button id="moveModeButton" class="mode" type="button">カテキン移動</button>
+            <button id="rotateModeButton" class="mode" type="button">カテキン回転</button>
+          </div>
+          <ul class="steps">
+            <li>タンパク質回転: 画面をドラッグ</li>
+            <li>カテキン移動: 見た目どおりの方向へドラッグ</li>
+            <li>カテキン回転: ドラッグで向きを調整</li>
+          </ul>
+          <label class="slider-label" for="depthSlider">
+            奥行き
+            <input id="depthSlider" type="range" min="-35" max="35" value="0">
+          </label>
+        </section>
+
+        <section>
+          <h2>微調整</h2>
+          <div class="nudge-grid">
+            <button data-nudge="up" type="button">上</button>
+            <button data-nudge="down" type="button">下</button>
+            <button data-nudge="left" type="button">左</button>
+            <button data-nudge="right" type="button">右</button>
+            <button data-nudge="snap" type="button">表面へ吸着</button>
+            <button data-nudge="out" type="button">外へ出す</button>
+          </div>
+        </section>
+
+        <section>
+          <h2>判定</h2>
+          <button id="scoreButton" class="primary" type="button">判定する</button>
+          <div class="score-card">
+            <div class="score-number">--</div>
+            <div class="score-label">まだ判定していません</div>
+            <dl>
+              <div>
+                <dt>囲まれ方</dt>
+                <dd id="enclosureScore">--</dd>
+              </div>
+              <div>
+                <dt>衝突</dt>
+                <dd id="collisionScore">--</dd>
+              </div>
+              <div>
+                <dt>接触</dt>
+                <dd id="contactScore">--</dd>
+              </div>
+            </dl>
+          </div>
+        </section>
+
+        <section>
+          <h2>ヒント</h2>
+          <button id="hintButton" type="button">くぼみ候補を表示</button>
+          <p id="message" class="message">まずタンパク質を回して、よさそうなくぼみを探してください。</p>
+        </section>
+      </aside>
+    </main>
+
+    <script src="3Dmol-min.js"></script>
+    <script src="app.js?v=12"></script>
+  </body>
+</html>
