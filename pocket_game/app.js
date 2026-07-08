@@ -8,6 +8,7 @@ const scoreButtonFloat = document.getElementById("scoreButtonFloat");
 const floatScoreNum = document.getElementById("floatScoreNum");
 const floatScoreLabel = document.getElementById("floatScoreLabel");
 const hintButton = document.getElementById("hintButton");
+const answerButton = document.getElementById("answerButton");
 const stageButtonsEl = document.getElementById("stageButtons");
 const stageBlurbEl = document.getElementById("stageBlurb");
 const proteinNameEl = document.getElementById("proteinName");
@@ -45,6 +46,8 @@ const STAGES = [
     blurb: "食品成分カテキンは、ラクトフェリンのどのくぼみにハマりそう？",
     mission: "ミッション: カテキンをくぼみにはめて 50点以上でクリア！",
     timeLimit: 180,
+    answerKind: "pocket",
+    answerNote: "カテキンがハマりやすい、深いくぼみのお手本です（候補は複数あります）。",
   },
   {
     id: "lactoferrin-ampicillin",
@@ -56,6 +59,8 @@ const STAGES = [
     blurb: "抗菌薬アンピシリンを、標的タンパク質のポケットに収めてみよう。",
     mission: "ミッション: 大きな抗菌薬を標的ポケットに収めろ！めり込み注意。",
     timeLimit: 240,
+    answerKind: "pocket",
+    answerNote: "抗菌薬がハマりやすい、標的タンパク質のくぼみのお手本です（候補は複数あります）。",
   },
   {
     id: "cholera-gm1",
@@ -67,6 +72,8 @@ const STAGES = [
     blurb: "コレラトキシンのBサブユニットは、宿主細胞表面のGM1ガングリオシドに結合して侵入する。GM1の糖鎖を結合ポケットへ導こう。",
     mission: "ミッション: Bサブユニットの糖結合ポケットにGM1五糖をはめろ！",
     timeLimit: 240,
+    answerKind: "ctb",
+    answerNote: "実際のGM1結合部位の1つです。コレラトキシンには5か所あり、毎回ランダムに表示します。",
   },
 ];
 
@@ -88,6 +95,8 @@ const state = {
   ligandTemplate: null,
   ligandHeavyCount: 12,
   pocketHints: [],
+  answerSites: [],
+  answerMarker: null,
   cleared: {},
   records: {},
   depthBase: 0,
@@ -144,10 +153,19 @@ async function loadStage(index) {
     state.proteinCenter = centroid(state.proteinAtoms);
     state.proteinRadius = boundingRadius(state.proteinAtoms, state.proteinCenter);
     state.pocketHints = buildPocketHints(state.proteinAtoms);
+    // "pocket" は初回の「正解を見る」で高スコア地点を探索してキャッシュ（遅延計算）
+    state.answerSites = stage.answerKind === "pocket"
+      ? []
+      : parseAnswerSites(cifText, stage.answerKind);
+    state.answerMarker = null;
     state.ligandTemplate = parseSdf(sdfText);
     state.ligandHeavyCount = Math.max(
       6,
       state.ligandTemplate.atoms.filter((atom) => atom.element !== "H").length
+    );
+    state.ligandMaxRadius = state.ligandTemplate.atoms.reduce(
+      (max, a) => Math.max(max, Math.hypot(a.x, a.y, a.z)),
+      0
     );
 
     state.viewer.clear();
@@ -224,6 +242,8 @@ function bindEvents() {
     hintButton.textContent = state.showHints ? "くぼみ候補を隠す" : "くぼみ候補を表示";
     redrawSceneExtras();
   });
+
+  answerButton.addEventListener("click", showAnswer);
 
   depthSlider.addEventListener("input", () => {
     maybeStartTimer();
@@ -315,6 +335,7 @@ function defaultPose() {
 }
 
 function resetPose() {
+  state.answerMarker = null;
   state.pose = defaultPose();
   snapLigandToSurface(13.0);
   state.depthBase = state.pose.tz;
@@ -413,6 +434,7 @@ function redrawSceneExtras() {
   state.viewer.removeAllShapes();
   if (typeof state.viewer.removeAllLabels === "function") state.viewer.removeAllLabels();
   if (state.showHints) drawPocketHints();
+  if (state.answerMarker) drawAnswerMarker();
   drawLigand();
   state.viewer.render();
 }
@@ -464,6 +486,178 @@ function drawPocketHints() {
       inFront: true,
     });
   }
+}
+
+// --- 正解（実際の結合部位）機能 ---
+
+function parseAnswerSites(text, kind) {
+  const sites = [];
+  const lines = text.split(/\r?\n/);
+  if (kind === "iron") {
+    for (const line of lines) {
+      if (!line.startsWith("HETATM")) continue;
+      const c = line.trim().split(/\s+/);
+      if (c[5] === "FE") {
+        const p = { x: Number(c[10]), y: Number(c[11]), z: Number(c[12]) };
+        if (Number.isFinite(p.x)) sites.push(p);
+      }
+    }
+    return sites;
+  }
+  if (kind === "ctb") {
+    // Bサブユニット（TRP88を持つ鎖）のGM1結合残基から各ポケットの中心を求める
+    const wanted = new Set([51, 56, 88, 90, 91]);
+    const acc = {};
+    const hasTrp88 = {};
+    for (const line of lines) {
+      if (!line.startsWith("ATOM")) continue;
+      const c = line.trim().split(/\s+/);
+      const asym = c[6];
+      const seq = parseInt(c[8], 10);
+      if (c[5] === "TRP" && seq === 88) hasTrp88[asym] = true;
+      if (wanted.has(seq)) {
+        const a = acc[asym] || (acc[asym] = { x: 0, y: 0, z: 0, n: 0 });
+        a.x += Number(c[10]);
+        a.y += Number(c[11]);
+        a.z += Number(c[12]);
+        a.n += 1;
+      }
+    }
+    for (const asym in acc) {
+      if (!hasTrp88[asym]) continue;
+      const a = acc[asym];
+      if (a.n > 0) sites.push({ x: a.x / a.n, y: a.y / a.n, z: a.z / a.n });
+    }
+    return sites;
+  }
+  return sites;
+}
+
+function showAnswer() {
+  const stage = STAGES[state.stageIndex];
+  answerButton.disabled = true;
+  message.textContent = "正解を計算中…";
+  // メッセージを描画させてから重い計算を実行
+  setTimeout(() => {
+    if (stage.answerKind === "pocket" && !state.answerSites.length) {
+      state.answerSites = computeGoodPockets(5);
+    }
+    revealAnswer(stage);
+    answerButton.disabled = false;
+  }, 20);
+}
+
+function revealAnswer(stage) {
+  if (!state.answerSites.length) {
+    message.textContent = "この構造では正解位置が見つかりませんでした。";
+    return;
+  }
+  const site = state.answerSites[Math.floor(Math.random() * state.answerSites.length)];
+  seatLigandAt(site);
+  state.answerMarker = site;
+  redrawSceneExtras();
+
+  const score = scoreLigand();
+  floatScoreNum.textContent = String(score.total);
+  floatScoreLabel.textContent = "お手本の位置";
+  scoreNumber.textContent = String(score.total);
+  scoreLabel.textContent = "お手本（正解の一例）";
+  message.textContent = (stage.answerNote || "実際の結合部位の一例です。") +
+    " 向きや奥行きを微調整すると、さらに高得点を狙えます。";
+}
+
+function computeGoodPockets(maxSites) {
+  const cas = state.proteinAtoms.filter((atom) => atom.name === "CA");
+  if (!cas.length) return [];
+  const saved = { ...state.pose };
+  const step = Math.max(1, Math.floor(cas.length / 90));
+  const scored = [];
+  for (let i = 0; i < cas.length; i += step) {
+    const seed = cas[i];
+    const dir = normalize({
+      x: seed.x - state.proteinCenter.x,
+      y: seed.y - state.proteinCenter.y,
+      z: seed.z - state.proteinCenter.z,
+    });
+    let best = -1;
+    for (const dist of [4, 5.5]) {
+      for (const ry of [0, 3.14]) {
+        state.pose.rx = 0.4;
+        state.pose.ry = ry;
+        state.pose.rz = 0;
+        state.pose.tx = seed.x + dir.x * dist;
+        state.pose.ty = seed.y + dir.y * dist;
+        state.pose.tz = seed.z + dir.z * dist;
+        const sc = scoreLigand().total;
+        if (sc > best) best = sc;
+      }
+    }
+    if (best >= 45) scored.push({ x: seed.x, y: seed.y, z: seed.z, score: best });
+  }
+  state.pose = saved;
+  scored.sort((a, b) => b.score - a.score);
+  const out = [];
+  for (const s of scored) {
+    if (out.every((o) => distance3d(o, s) >= 12)) out.push(s);
+    if (out.length >= maxSites) break;
+  }
+  return out;
+}
+
+function seatLigandAt(site) {
+  const dir = normalize({
+    x: site.x - state.proteinCenter.x,
+    y: site.y - state.proteinCenter.y,
+    z: site.z - state.proteinCenter.z,
+  });
+  // 探索中はサイト近傍の原子だけで判定して高速化（遠い原子はカットオフ外で寄与しない）
+  const fullAtoms = state.proteinAtoms;
+  const radius = (state.ligandMaxRadius || 12) + 7 + 9;
+  const local = fullAtoms.filter((a) => distance3d(a, site) < radius);
+  state.proteinAtoms = local.length ? local : fullAtoms;
+  let best = null;
+  let bestScore = -1;
+  for (const ry of [0, 1.05, 2.09, 3.14, 4.19, 5.24]) {
+    for (const rx of [0, 1.57, 3.14, 4.71]) {
+      for (const rz of [0, 1.6, 3.1]) {
+        for (const dist of [2, 3, 4, 5, 6, 7]) {
+          state.pose.rx = rx;
+          state.pose.ry = ry;
+          state.pose.rz = rz;
+          state.pose.tx = site.x + dir.x * dist;
+          state.pose.ty = site.y + dir.y * dist;
+          state.pose.tz = site.z + dir.z * dist;
+          const sc = scoreLigand().total;
+          if (sc > bestScore) {
+            bestScore = sc;
+            best = { rx, ry, rz, tx: state.pose.tx, ty: state.pose.ty, tz: state.pose.tz };
+          }
+        }
+      }
+    }
+  }
+  state.proteinAtoms = fullAtoms;
+  if (best) state.pose = best;
+  state.depthBase = state.pose.tz;
+  syncDepthSlider();
+}
+
+function drawAnswerMarker() {
+  state.viewer.addSphere({
+    center: state.answerMarker,
+    radius: 3.4,
+    color: "0x5fd0ff",
+    alpha: 0.3,
+    wireframe: true,
+  });
+  state.viewer.addLabel("結合部位", {
+    position: state.answerMarker,
+    fontColor: "white",
+    backgroundColor: "0x2179a8",
+    backgroundOpacity: 0.85,
+    fontSize: 13,
+    inFront: true,
+  });
 }
 
 function parseCifAtoms(text) {

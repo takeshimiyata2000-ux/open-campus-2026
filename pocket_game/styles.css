@@ -295,10 +295,21 @@ h2 {
 
 .mode-grid,
 .nudge-grid,
-.stage-grid {
+.stage-grid,
+.hint-grid {
   display: grid;
   grid-template-columns: 1fr;
   gap: 8px;
+}
+
+#answerButton {
+  border-color: var(--good);
+  color: var(--good);
+  font-weight: 700;
+}
+
+#answerButton:hover {
+  background: rgba(82, 209, 133, 0.14);
 }
 
 .stage-grid {

@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>分子ドッキング ポケット探索ゲーム</title>
-    <link rel="stylesheet" href="styles.css?v=8">
+    <link rel="stylesheet" href="styles.css?v=9">
   </head>
   <body>
     <main class="app">
@@ -106,13 +106,16 @@
 
         <section>
           <h2>ヒント</h2>
-          <button id="hintButton" type="button">くぼみ候補を表示</button>
+          <div class="hint-grid">
+            <button id="hintButton" type="button">くぼみ候補を表示</button>
+            <button id="answerButton" type="button">正解を見る（お手本）</button>
+          </div>
           <p id="message" class="message">まずタンパク質を回して、よさそうなくぼみを探してください。</p>
         </section>
       </aside>
     </main>
 
     <script src="3Dmol-min.js"></script>
-    <script src="app.js?v=16"></script>
+    <script src="app.js?v=17"></script>
   </body>
 </html>
