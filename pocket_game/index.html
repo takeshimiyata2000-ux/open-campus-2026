@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>分子ドッキング ポケット探索ゲーム</title>
-    <link rel="stylesheet" href="styles.css?v=9">
+    <link rel="stylesheet" href="styles.css?v=10">
   </head>
   <body>
     <main class="app">
@@ -71,9 +71,8 @@
             <button data-nudge="down" type="button">下</button>
             <button data-nudge="left" type="button">左</button>
             <button data-nudge="right" type="button">右</button>
-            <button data-nudge="snap" type="button">表面へ吸着</button>
-            <button data-nudge="out" type="button">外へ出す</button>
           </div>
+          <p class="hint-note">奥行き（前後）は「操作モード」の奥行きスライダーで調整します。</p>
         </section>
 
         <section>
@@ -112,10 +111,15 @@
           </div>
           <p id="message" class="message">まずタンパク質を回して、よさそうなくぼみを探してください。</p>
         </section>
+
+        <section>
+          <h2>ランキング（最高記録）</h2>
+          <ol id="leaderboard" class="leaderboard"><li class="empty">まだ記録がありません</li></ol>
+        </section>
       </aside>
     </main>
 
     <script src="3Dmol-min.js"></script>
-    <script src="app.js?v=19"></script>
+    <script src="app.js?v=20"></script>
   </body>
 </html>

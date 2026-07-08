@@ -20,6 +20,7 @@ const hudTimerEl = document.getElementById("hudTimer");
 const hudTimerValueEl = document.getElementById("hudTimerValue");
 const bestScoreEl = document.getElementById("bestScore");
 const bestTimeEl = document.getElementById("bestTime");
+const leaderboardEl = document.getElementById("leaderboard");
 const modeButtons = {
   view: document.getElementById("viewModeButton"),
   move: document.getElementById("moveModeButton"),
@@ -34,6 +35,8 @@ const message = document.getElementById("message");
 
 const CLEAR_THRESHOLD = 50;
 const RECORDS_KEY = "pocketGame.records.v1";
+const LEADERBOARD_KEY = "pocketGame.leaderboard.v1";
+const LEADERBOARD_MAX = 8;
 
 const STAGES = [
   {
@@ -102,6 +105,7 @@ const state = {
   answerMarker: null,
   cleared: {},
   records: {},
+  leaderboard: [],
   depthBase: 0,
   mode: "view",
   showHints: false,
@@ -126,8 +130,10 @@ async function init() {
   }
   state.mol3d = mol3d;
   state.records = loadRecords();
+  state.leaderboard = loadLeaderboard();
   bindEvents();
   buildStageButtons();
+  renderLeaderboard();
 
   state.viewer = mol3d.createViewer(viewerEl, {
     backgroundColor: "black",
@@ -235,6 +241,7 @@ function bindEvents() {
     resetPose();
     clearScore();
     resetTimer(STAGES[state.stageIndex].timeLimit);
+    clearSessionRecords();
   });
 
   scoreButton.addEventListener("click", doJudge);
@@ -303,8 +310,6 @@ function bindEvents() {
       if (action === "down") moveByScreenOffset(0, 28);
       if (action === "left") moveByScreenOffset(-28, 0);
       if (action === "right") moveByScreenOffset(28, 0);
-      if (action === "snap") snapLigandToSurface(7.0);
-      if (action === "out") snapLigandToSurface(13.0);
       syncDepthSlider();
       redrawSceneExtras();
     });
@@ -863,9 +868,11 @@ function renderScore(score) {
     state.cleared[stage.id] = true;
     const clearTime = state.timerRunning ? state.timeLimit - state.timeLeft : null;
     const updated = recordResult(stage.id, score.total, clearTime);
+    addToLeaderboard(stage.title, score.total, clearTime);
     stopTimer();
     updateStageButtons();
     renderRecords();
+    renderLeaderboard();
     celebrate(score.total, firstClear);
     let note = firstClear
       ? "ステージクリア！ 別のステージや低分子にも挑戦してみよう。"
@@ -1042,6 +1049,72 @@ function renderRecords() {
   const record = state.records[stage.id];
   bestScoreEl.textContent = record && record.bestScore ? String(record.bestScore) : "--";
   bestTimeEl.textContent = record && record.bestTimeSec != null ? formatTime(record.bestTimeSec) : "--";
+}
+
+function clearSessionRecords() {
+  state.records = {};
+  saveRecords();
+  updateStageButtons();
+  renderRecords();
+}
+
+// --- ランキング（消えない最高記録） ---
+
+function loadLeaderboard() {
+  try {
+    const raw = window.localStorage.getItem(LEADERBOARD_KEY);
+    const list = raw ? JSON.parse(raw) : [];
+    return Array.isArray(list) ? list : [];
+  } catch (error) {
+    return [];
+  }
+}
+
+function saveLeaderboard() {
+  try {
+    window.localStorage.setItem(LEADERBOARD_KEY, JSON.stringify(state.leaderboard));
+  } catch (error) {
+    // localStorageが使えない環境では保持しないだけ
+  }
+}
+
+function addToLeaderboard(stageTitle, score, timeSec) {
+  state.leaderboard.push({ stage: stageTitle, score, timeSec: timeSec == null ? null : timeSec });
+  state.leaderboard.sort((a, b) => {
+    if (b.score !== a.score) return b.score - a.score;
+    const ta = a.timeSec == null ? Infinity : a.timeSec;
+    const tb = b.timeSec == null ? Infinity : b.timeSec;
+    return ta - tb;
+  });
+  state.leaderboard = state.leaderboard.slice(0, LEADERBOARD_MAX);
+  saveLeaderboard();
+}
+
+function renderLeaderboard() {
+  leaderboardEl.innerHTML = "";
+  if (!state.leaderboard.length) {
+    const li = document.createElement("li");
+    li.className = "empty";
+    li.textContent = "まだ記録がありません";
+    leaderboardEl.appendChild(li);
+    return;
+  }
+  for (const entry of state.leaderboard) {
+    const li = document.createElement("li");
+    const stageSpan = document.createElement("span");
+    stageSpan.className = "lb-stage";
+    stageSpan.textContent = entry.stage;
+    const scoreSpan = document.createElement("span");
+    scoreSpan.className = "lb-score";
+    scoreSpan.textContent = `${entry.score}点`;
+    const timeSpan = document.createElement("span");
+    timeSpan.className = "lb-time";
+    timeSpan.textContent = entry.timeSec == null ? "" : formatTime(entry.timeSec);
+    li.appendChild(stageSpan);
+    li.appendChild(scoreSpan);
+    li.appendChild(timeSpan);
+    leaderboardEl.appendChild(li);
+  }
 }
 
 // --- 成功演出（音・紙吹雪・回転） ---
