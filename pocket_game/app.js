@@ -46,6 +46,7 @@ const STAGES = [
     blurb: "食品成分カテキンは、ラクトフェリンのどのくぼみにハマりそう？",
     mission: "ミッション: カテキンをくぼみにはめて 50点以上でクリア！",
     timeLimit: 180,
+    clearThreshold: 50,
     answerKind: "pocket",
     answerNote: "ラクトフェリンとカテキンの本当の結合部位は、実はまだ誰も分かっていません。これはゲームのルールで高得点になるくぼみの一例です（候補は複数）。",
   },
@@ -59,6 +60,7 @@ const STAGES = [
     blurb: "抗菌薬アンピシリンを、標的タンパク質のポケットに収めてみよう。",
     mission: "ミッション: 大きな抗菌薬を標的ポケットに収めろ！めり込み注意。",
     timeLimit: 240,
+    clearThreshold: 50,
     answerKind: "pocket",
     answerNote: "抗菌薬との本当の結合部位はまだ未解明です。これはゲームのルールで高得点になる標的タンパク質のくぼみの一例です（候補は複数）。",
   },
@@ -70,8 +72,9 @@ const STAGES = [
     ligand: "ligands/gm1_pentasaccharide.sdf",
     ligandName: "GM1五糖（GM1ガングリオシドの糖鎖）",
     blurb: "コレラトキシンのBサブユニットは、宿主細胞表面のGM1ガングリオシドに結合して侵入する。GM1の糖鎖を結合ポケットへ導こう。",
-    mission: "ミッション: Bサブユニットの糖結合ポケットにGM1五糖をはめろ！",
+    mission: "ミッション: Bサブユニットの糖結合ポケットにGM1五糖をはめて 35点以上でクリア！",
     timeLimit: 240,
+    clearThreshold: 35,
     answerKind: "ctb",
     answerNote: "実際のGM1結合部位の1つです。コレラトキシンには5か所あり、毎回ランダムに表示します。",
   },
@@ -627,9 +630,11 @@ function seatLigandAt(site) {
           state.pose.tx = site.x + dir.x * dist;
           state.pose.ty = site.y + dir.y * dist;
           state.pose.tz = site.z + dir.z * dist;
-          const sc = scoreLigand().total;
-          if (sc > bestScore) {
-            bestScore = sc;
+          const sc = scoreLigand();
+          // 見た目重視: めり込み（衝突）を強めに減点し、きれいに乗った姿勢を選ぶ
+          const obj = sc.total - sc.collisions * 3 - sc.severeCollisions * 10;
+          if (obj > bestScore) {
+            bestScore = obj;
             best = { rx, ry, rz, tx: state.pose.tx, ty: state.pose.ty, tz: state.pose.tz };
           }
         }
@@ -643,21 +648,19 @@ function seatLigandAt(site) {
 }
 
 function drawAnswerMarker() {
-  const label = STAGES[state.stageIndex].answerKind === "ctb" ? "結合部位" : "お手本のくぼみ";
+  // 分子に重なる文字ラベルは出さず、シアン色の球でお手本位置を示す
   state.viewer.addSphere({
     center: state.answerMarker,
-    radius: 3.4,
+    radius: 4.2,
     color: "0x5fd0ff",
-    alpha: 0.3,
-    wireframe: true,
+    alpha: 0.22,
   });
-  state.viewer.addLabel(label, {
-    position: state.answerMarker,
-    fontColor: "white",
-    backgroundColor: "0x2179a8",
-    backgroundOpacity: 0.85,
-    fontSize: 13,
-    inFront: true,
+  state.viewer.addSphere({
+    center: state.answerMarker,
+    radius: 4.6,
+    color: "0x5fd0ff",
+    alpha: 0.5,
+    wireframe: true,
   });
 }
 
@@ -802,7 +805,7 @@ function scoreLigand() {
     severeCollisions,
     contacts,
     minDistance,
-    reason: labelForScore(total, collisions, severeCollisions),
+    reason: labelForScore(total, collisions, severeCollisions, STAGES[state.stageIndex].clearThreshold || CLEAR_THRESHOLD),
   };
 }
 
@@ -853,7 +856,8 @@ function renderScore(score) {
       : "低分子がタンパク質の内部に入り込みすぎています。外へ出してから置き直してください。";
     return;
   }
-  if (score.total >= CLEAR_THRESHOLD) {
+  const threshold = STAGES[state.stageIndex].clearThreshold || CLEAR_THRESHOLD;
+  if (score.total >= threshold) {
     const stage = STAGES[state.stageIndex];
     const firstClear = !state.cleared[stage.id];
     state.cleared[stage.id] = true;
@@ -886,11 +890,11 @@ function clearScore() {
   message.textContent = "まずタンパク質を回して、よさそうなくぼみを探してください。";
 }
 
-function labelForScore(score, collisions, severeCollisions) {
+function labelForScore(score, collisions, severeCollisions, threshold) {
   if (severeCollisions > 1 || collisions > 14) return "少しめり込み";
-  if (score >= 80) return "かなりハマっている";
-  if (score >= 50) return "入りそう";
-  if (score >= 35) return "あと少し";
+  if (score >= threshold + 30) return "かなりハマっている";
+  if (score >= threshold) return "入りそう";
+  if (score >= threshold - 15) return "あと少し";
   return "別のくぼみを探そう";
 }
 
