@@ -47,7 +47,7 @@ const STAGES = [
     mission: "ミッション: カテキンをくぼみにはめて 50点以上でクリア！",
     timeLimit: 180,
     answerKind: "pocket",
-    answerNote: "カテキンがハマりやすい、深いくぼみのお手本です（候補は複数あります）。",
+    answerNote: "ラクトフェリンとカテキンの本当の結合部位は、実はまだ誰も分かっていません。これはゲームのルールで高得点になるくぼみの一例です（候補は複数）。",
   },
   {
     id: "lactoferrin-ampicillin",
@@ -60,7 +60,7 @@ const STAGES = [
     mission: "ミッション: 大きな抗菌薬を標的ポケットに収めろ！めり込み注意。",
     timeLimit: 240,
     answerKind: "pocket",
-    answerNote: "抗菌薬がハマりやすい、標的タンパク質のくぼみのお手本です（候補は複数あります）。",
+    answerNote: "抗菌薬との本当の結合部位はまだ未解明です。これはゲームのルールで高得点になる標的タンパク質のくぼみの一例です（候補は複数）。",
   },
   {
     id: "cholera-gm1",
@@ -643,6 +643,7 @@ function seatLigandAt(site) {
 }
 
 function drawAnswerMarker() {
+  const label = STAGES[state.stageIndex].answerKind === "ctb" ? "結合部位" : "お手本のくぼみ";
   state.viewer.addSphere({
     center: state.answerMarker,
     radius: 3.4,
@@ -650,7 +651,7 @@ function drawAnswerMarker() {
     alpha: 0.3,
     wireframe: true,
   });
-  state.viewer.addLabel("結合部位", {
+  state.viewer.addLabel(label, {
     position: state.answerMarker,
     fontColor: "white",
     backgroundColor: "0x2179a8",
