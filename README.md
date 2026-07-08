@@ -8,14 +8,14 @@
 複数ステージを切り替えられ、高得点を出すと音と紙吹雪で祝福します。
 
 各ステージにはミッション文と制限時間（画面右上にカウントダウン）があり、
-62点以上でクリア。ハイスコアとベストタイムはブラウザに保存され、
+50点以上でクリア。ハイスコアとベストタイムはブラウザに保存され、
 ステージ名の横に「★スコア」として表示されます（`localStorage` 利用）。
 
 ### ステージ
 
-1. **ラクトフェリン × カテキン** — 食品成分（茶ポリフェノール）を鉄結合タンパク質に。
-2. **ラクトフェリン × 抗菌薬** — 私たちの標的タンパク質にアンピシリンをドッキング。
-3. **コレラ毒素 × 糖** — 毒素が細胞表面の糖（ガラクトース）に結合する様子を体験。
+1. **ラクトフェリン × カテキン** — 食品成分（茶ポリフェノール）をミルク由来タンパク質に。
+2. **ラクトフェリン × 抗菌薬** — 標的タンパク質にアンピシリンをドッキング。
+3. **コレラトキシン × GM1** — Bサブユニットが宿主細胞表面のGM1ガングリオシド糖鎖に結合する様子を体験。
 
 ### 起動
 
@@ -42,16 +42,18 @@ http://127.0.0.1:8787/pocket_game/
 - `pocket_game/3Dmol-min.js`
 - `pocket_game/catechin.sdf`
 - `pocket_game/ligands/ampicillin.sdf`
-- `pocket_game/ligands/galactose.sdf`
+- `pocket_game/ligands/gm1_pentasaccharide.sdf`
 - `pdb_cache/1blf.cif`（ラクトフェリン）
-- `pdb_cache/1xtc.cif`（コレラ毒素）
+- `pdb_cache/1xtc.cif`（コレラトキシン）
 
 これらを含めておけば、ネット接続なしでもローカルサーバー経由で動作します。
 
 ### 低分子データの出典
 
-`pocket_game/ligands/` のSDFはPubChemの3D構造（アンピシリン CID 6249、ガラクトース CID 6036、
-ほかに ciprofloxacin・lactose も同梱）を利用しています。
+`pocket_game/ligands/` のSDFは以下を利用しています。
+- アンピシリン（PubChem CID 6249）ほか ciprofloxacin・galactose・lactose・sialic_acid（PubChem 3D構造）
+- `gm1_pentasaccharide.sdf` は PDB 3CHB（コレラトキシンB–GM1複合体）に結合したGM1五糖の実座標から抽出し、
+  原子間距離で結合を再構成したもの。
 
 ### ステージ・低分子の追加
 
