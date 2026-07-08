@@ -79,9 +79,181 @@ h2 {
 }
 
 #viewer,
-#interactionLayer {
+#interactionLayer,
+#confetti {
   position: absolute;
   inset: 0;
+}
+
+#confetti {
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 8;
+  opacity: 0;
+  transition: opacity 0.25s ease;
+}
+
+#confetti.show {
+  opacity: 1;
+}
+
+.celebrate-banner {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%) scale(0.7);
+  padding: 14px 30px;
+  border-radius: 14px;
+  background: rgba(31, 143, 86, 0.92);
+  color: #fff;
+  font-size: 30px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-shadow: 0 2px 6px rgba(0, 0, 0, 0.35);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.45);
+  opacity: 0;
+  pointer-events: none;
+  z-index: 9;
+}
+
+.celebrate-banner.show {
+  animation: pop-banner 1.8s cubic-bezier(0.18, 0.9, 0.28, 1.2) forwards;
+}
+
+.hud {
+  position: absolute;
+  top: 14px;
+  left: 14px;
+  right: 14px;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  pointer-events: none;
+  z-index: 7;
+}
+
+.hud-mission {
+  max-width: 70%;
+  padding: 8px 14px;
+  border-radius: 10px;
+  background: rgba(16, 17, 19, 0.72);
+  border: 1px solid rgba(243, 178, 60, 0.55);
+  color: var(--text);
+  font-size: 15px;
+  font-weight: 700;
+  line-height: 1.4;
+  backdrop-filter: blur(2px);
+}
+
+.hud-timer {
+  padding: 8px 14px;
+  border-radius: 10px;
+  background: rgba(16, 17, 19, 0.72);
+  border: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 15px;
+  white-space: nowrap;
+  backdrop-filter: blur(2px);
+}
+
+.hud-timer span {
+  color: var(--text);
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  font-size: 18px;
+}
+
+.hud-timer.running span {
+  color: var(--good);
+}
+
+.hud-timer.low span {
+  color: var(--accent);
+}
+
+.hud-timer.timeout {
+  border-color: var(--bad, #e65a4f);
+}
+
+.hud-timer.timeout span {
+  color: #e65a4f;
+}
+
+.viewer-actions {
+  position: absolute;
+  left: 50%;
+  bottom: 18px;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 10px 14px;
+  border-radius: 14px;
+  background: rgba(16, 17, 19, 0.82);
+  border: 1px solid var(--line);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
+  backdrop-filter: blur(3px);
+  z-index: 10;
+  max-width: calc(100% - 28px);
+}
+
+.viewer-actions .primary {
+  width: auto;
+  min-width: 128px;
+  min-height: 48px;
+  font-size: 17px;
+  padding: 0 22px;
+}
+
+.float-score {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  white-space: nowrap;
+}
+
+.float-score-num {
+  font-size: 34px;
+  font-weight: 800;
+  line-height: 1;
+  color: var(--accent);
+  font-variant-numeric: tabular-nums;
+}
+
+.float-score-label {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.float-score-num.celebrate {
+  animation: score-pop 0.9s cubic-bezier(0.18, 0.9, 0.28, 1.2);
+}
+
+.record-line {
+  margin-top: 8px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.record-line span {
+  color: var(--accent);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.record-line .record-sep {
+  color: var(--line);
+  font-weight: 400;
+  margin: 0 4px;
+}
+
+@keyframes pop-banner {
+  0% { opacity: 0; transform: translate(-50%, -50%) scale(0.6); }
+  15% { opacity: 1; transform: translate(-50%, -50%) scale(1.08); }
+  70% { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+  100% { opacity: 0; transform: translate(-50%, -58%) scale(1); }
 }
 
 #viewer {
@@ -122,10 +294,52 @@ h2 {
 }
 
 .mode-grid,
-.nudge-grid {
+.nudge-grid,
+.stage-grid {
   display: grid;
   grid-template-columns: 1fr;
   gap: 8px;
+}
+
+.stage-grid {
+  margin-bottom: 12px;
+}
+
+button.stage {
+  text-align: left;
+  line-height: 1.4;
+  padding: 10px 12px;
+  min-height: 0;
+}
+
+button.stage.active {
+  color: #111;
+  background: var(--accent);
+  border-color: var(--accent);
+  font-weight: 700;
+}
+
+button.stage .stage-clear {
+  color: var(--good);
+  font-weight: 700;
+}
+
+button.stage.active .stage-clear {
+  color: #0d5c2e;
+}
+
+.stage-meta {
+  list-style: none;
+  padding: 0;
+  margin: 12px 0 0;
+  display: grid;
+  gap: 4px;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.stage-meta span {
+  color: var(--text);
 }
 
 .nudge-grid {
@@ -192,6 +406,16 @@ button.mode.active {
   font-weight: 800;
   line-height: 1;
   color: var(--accent);
+}
+
+.score-number.celebrate {
+  animation: score-pop 0.9s cubic-bezier(0.18, 0.9, 0.28, 1.2);
+}
+
+@keyframes score-pop {
+  0% { transform: scale(1); }
+  35% { transform: scale(1.35); color: var(--good); }
+  100% { transform: scale(1); }
 }
 
 .score-label {

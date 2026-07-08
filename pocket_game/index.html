@@ -3,42 +3,60 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>ラクトフェリン ポケット探索ゲーム</title>
-    <link rel="stylesheet" href="styles.css?v=5">
+    <title>分子ドッキング ポケット探索ゲーム</title>
+    <link rel="stylesheet" href="styles.css?v=8">
   </head>
   <body>
     <main class="app">
       <section class="viewer-panel">
         <div class="topbar">
           <div>
-            <h1>ラクトフェリン ポケット探索ゲーム</h1>
-            <p>白いsurfaceのくぼみに、カテキンを置いてハマり具合を判定します。</p>
+            <h1>分子ドッキング ポケット探索ゲーム</h1>
+            <p>白いsurfaceのくぼみに低分子を置いて、ハマり具合を判定します。</p>
           </div>
           <button id="resetButton" type="button">リセット</button>
         </div>
         <div class="viewer-wrap">
-          <div id="viewer" aria-label="ラクトフェリンとカテキンの3Dビュー"></div>
+          <div id="viewer" aria-label="タンパク質と低分子の3Dビュー"></div>
           <div id="interactionLayer" aria-hidden="true"></div>
+          <canvas id="confetti" aria-hidden="true"></canvas>
+          <div id="celebrateBanner" class="celebrate-banner" aria-hidden="true"></div>
+          <div id="hud" class="hud">
+            <div id="hudMission" class="hud-mission">ミッション</div>
+            <div id="hudTimer" class="hud-timer">残り <span id="hudTimerValue">--:--</span></div>
+          </div>
+          <div class="viewer-actions">
+            <div class="float-score">
+              <span id="floatScoreNum" class="float-score-num">--</span>
+              <span id="floatScoreLabel" class="float-score-label">判定を押してね</span>
+            </div>
+            <button id="scoreButtonFloat" class="primary" type="button">判定する</button>
+          </div>
         </div>
       </section>
 
       <aside class="control-panel">
         <section>
-          <h2>ミッション</h2>
-          <p class="mission">カテキンは、ラクトフェリンのどのくぼみにハマりそう？</p>
+          <h2>ステージ</h2>
+          <div id="stageButtons" class="stage-grid" role="group" aria-label="ステージ選択"></div>
+          <p id="stageBlurb" class="mission">読み込み中…</p>
+          <ul class="stage-meta">
+            <li>タンパク質: <span id="proteinName">--</span></li>
+            <li>低分子: <span id="ligandName">--</span></li>
+          </ul>
         </section>
 
         <section>
           <h2>操作モード</h2>
           <div class="mode-grid" role="group" aria-label="操作モード">
             <button id="viewModeButton" class="mode active" type="button">タンパク質回転</button>
-            <button id="moveModeButton" class="mode" type="button">カテキン移動</button>
-            <button id="rotateModeButton" class="mode" type="button">カテキン回転</button>
+            <button id="moveModeButton" class="mode" type="button">低分子 移動</button>
+            <button id="rotateModeButton" class="mode" type="button">低分子 回転</button>
           </div>
           <ul class="steps">
             <li>タンパク質回転: 画面をドラッグ</li>
-            <li>カテキン移動: 見た目どおりの方向へドラッグ</li>
-            <li>カテキン回転: ドラッグで向きを調整</li>
+            <li>低分子 移動: 見た目どおりの方向へドラッグ</li>
+            <li>低分子 回転: ドラッグで向きを調整</li>
           </ul>
           <label class="slider-label" for="depthSlider">
             奥行き
@@ -64,6 +82,11 @@
           <div class="score-card">
             <div class="score-number">--</div>
             <div class="score-label">まだ判定していません</div>
+            <div class="record-line">
+              ベスト <span id="bestScore">--</span>
+              <span class="record-sep">／</span>
+              最速 <span id="bestTime">--</span>
+            </div>
             <dl>
               <div>
                 <dt>囲まれ方</dt>
@@ -90,6 +113,6 @@
     </main>
 
     <script src="3Dmol-min.js"></script>
-    <script src="app.js?v=12"></script>
+    <script src="app.js?v=15"></script>
   </body>
 </html>

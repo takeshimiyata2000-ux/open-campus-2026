@@ -1,10 +1,24 @@
 const viewerEl = document.getElementById("viewer");
-window.POCKET_APP_VERSION = "3dmol-surface-v1";
+window.POCKET_APP_VERSION = "3dmol-stages-v2";
 const interactionLayer = document.getElementById("interactionLayer");
 const depthSlider = document.getElementById("depthSlider");
 const resetButton = document.getElementById("resetButton");
 const scoreButton = document.getElementById("scoreButton");
+const scoreButtonFloat = document.getElementById("scoreButtonFloat");
+const floatScoreNum = document.getElementById("floatScoreNum");
+const floatScoreLabel = document.getElementById("floatScoreLabel");
 const hintButton = document.getElementById("hintButton");
+const stageButtonsEl = document.getElementById("stageButtons");
+const stageBlurbEl = document.getElementById("stageBlurb");
+const proteinNameEl = document.getElementById("proteinName");
+const ligandNameEl = document.getElementById("ligandName");
+const confettiCanvas = document.getElementById("confetti");
+const celebrateBanner = document.getElementById("celebrateBanner");
+const hudMissionEl = document.getElementById("hudMission");
+const hudTimerEl = document.getElementById("hudTimer");
+const hudTimerValueEl = document.getElementById("hudTimerValue");
+const bestScoreEl = document.getElementById("bestScore");
+const bestTimeEl = document.getElementById("bestTime");
 const modeButtons = {
   view: document.getElementById("viewModeButton"),
   move: document.getElementById("moveModeButton"),
@@ -17,6 +31,45 @@ const collisionScoreEl = document.getElementById("collisionScore");
 const contactScoreEl = document.getElementById("contactScore");
 const message = document.getElementById("message");
 
+const CLEAR_THRESHOLD = 50;
+const RECORDS_KEY = "pocketGame.records.v1";
+
+const STAGES = [
+  {
+    id: "lactoferrin-catechin",
+    title: "1. カテキン",
+    protein: "../pdb_cache/1blf.cif",
+    proteinName: "ラクトフェリン（鉄結合タンパク質）",
+    ligand: "catechin.sdf",
+    ligandName: "カテキン（茶ポリフェノール）",
+    blurb: "食品成分カテキンは、ラクトフェリンのどのくぼみにハマりそう？",
+    mission: "ミッション: カテキンをくぼみにはめて 50点以上でクリア！",
+    timeLimit: 180,
+  },
+  {
+    id: "lactoferrin-ampicillin",
+    title: "2. 抗菌薬",
+    protein: "../pdb_cache/1blf.cif",
+    proteinName: "ラクトフェリン（私たちの標的タンパク質）",
+    ligand: "ligands/ampicillin.sdf",
+    ligandName: "アンピシリン（β-ラクタム系抗菌薬）",
+    blurb: "抗菌薬アンピシリンを、標的タンパク質のポケットに収めてみよう。",
+    mission: "ミッション: 大きな抗菌薬を標的ポケットに収めろ！めり込み注意。",
+    timeLimit: 240,
+  },
+  {
+    id: "cholera-galactose",
+    title: "3. 毒素と糖",
+    protein: "../pdb_cache/1xtc.cif",
+    proteinName: "コレラ毒素（Bサブユニット）",
+    ligand: "ligands/galactose.sdf",
+    ligandName: "ガラクトース（細胞表面の糖）",
+    blurb: "コレラ毒素は細胞表面の糖に結合して働く。糖をポケットへ導こう。",
+    mission: "ミッション: 毒素の糖結合ポケットにガラクトースを導け！",
+    timeLimit: 180,
+  },
+];
+
 const atomColors = {
   C: "0xf3b23c",
   O: "0xe65a4f",
@@ -27,22 +80,28 @@ const atomColors = {
 
 const state = {
   viewer: null,
+  mol3d: null,
+  stageIndex: 0,
   proteinAtoms: [],
   proteinCenter: { x: 0, y: 0, z: 0 },
+  proteinRadius: 30,
   ligandTemplate: null,
+  ligandHeavyCount: 12,
   pocketHints: [],
+  cleared: {},
+  records: {},
+  depthBase: 0,
   mode: "view",
   showHints: false,
   dragging: false,
+  audioCtx: null,
+  timer: null,
+  timeLimit: 90,
+  timeLeft: 90,
+  timerRunning: false,
+  timedOut: false,
   last: { x: 0, y: 0 },
-  pose: {
-    tx: 70,
-    ty: 47,
-    tz: 19,
-    rx: 0.2,
-    ry: -0.6,
-    rz: 0.1,
-  },
+  pose: { tx: 0, ty: 0, tz: 0, rx: 0.2, ry: -0.6, rz: 0.1 },
 };
 
 init();
@@ -53,40 +112,97 @@ async function init() {
     message.textContent = "3Dmol.jsを読み込めません。3Dmol-min.jsの場所を確認してください。";
     return;
   }
-
+  state.mol3d = mol3d;
+  state.records = loadRecords();
   bindEvents();
+  buildStageButtons();
 
   state.viewer = mol3d.createViewer(viewerEl, {
     backgroundColor: "black",
     antialias: true,
   });
 
+  await loadStage(0);
+}
+
+async function loadStage(index) {
+  const stage = STAGES[index];
+  if (!stage) return;
+  state.stageIndex = index;
+  stopTimer();
+  updateStageButtons();
+  clearScore();
+  message.textContent = "構造を読み込んでいます…";
+
   try {
     const [cifText, sdfText] = await Promise.all([
-      fetch("../pdb_cache/1blf.cif").then((res) => res.text()),
-      fetch("catechin.sdf").then((res) => res.text()),
+      fetch(stage.protein).then((res) => res.text()),
+      fetch(stage.ligand).then((res) => res.text()),
     ]);
 
     state.proteinAtoms = parseCifAtoms(cifText);
     state.proteinCenter = centroid(state.proteinAtoms);
+    state.proteinRadius = boundingRadius(state.proteinAtoms, state.proteinCenter);
     state.pocketHints = buildPocketHints(state.proteinAtoms);
     state.ligandTemplate = parseSdf(sdfText);
+    state.ligandHeavyCount = Math.max(
+      6,
+      state.ligandTemplate.atoms.filter((atom) => atom.element !== "H").length
+    );
 
+    state.viewer.clear();
     const proteinModel = state.viewer.addModel(cifText, "cif");
     proteinModel.setStyle({}, { cartoon: { color: "white", opacity: 0.18 } });
     state.viewer.addSurface(
-      mol3d.SurfaceType.VDW,
+      state.mol3d.SurfaceType.VDW,
       { color: "white", opacity: 0.82 },
       { model: proteinModel }
     );
     state.viewer.zoomTo();
     state.viewer.render();
 
+    stageBlurbEl.textContent = stage.blurb;
+    proteinNameEl.textContent = stage.proteinName;
+    ligandNameEl.textContent = stage.ligandName;
+    hudMissionEl.textContent = stage.mission;
+    resetTimer(stage.timeLimit);
+    renderRecords();
+
+    state.showHints = false;
+    hintButton.textContent = "くぼみ候補を表示";
+    setMode("view");
     resetPose();
+    message.textContent = "まずタンパク質を回して、よさそうなくぼみを探してください。";
   } catch (error) {
     message.textContent = "構造ファイルを読み込めません。ローカルサーバーから開いてください。";
     console.error(error);
   }
+}
+
+function buildStageButtons() {
+  stageButtonsEl.innerHTML = "";
+  STAGES.forEach((stage, index) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "stage";
+    button.dataset.stage = String(index);
+    button.addEventListener("click", () => loadStage(index));
+    stageButtonsEl.appendChild(button);
+  });
+  updateStageButtons();
+}
+
+function updateStageButtons() {
+  stageButtonsEl.querySelectorAll("button.stage").forEach((button) => {
+    const index = Number(button.dataset.stage);
+    const stage = STAGES[index];
+    const record = state.records[stage.id];
+    const best = record && Number.isFinite(record.bestScore)
+      ? ` <span class="stage-clear">★${record.bestScore}</span>`
+      : "";
+    button.innerHTML = stage.title + best;
+    button.classList.toggle("active", index === state.stageIndex);
+  });
 }
 
 function bindEvents() {
@@ -97,12 +213,11 @@ function bindEvents() {
   resetButton.addEventListener("click", () => {
     resetPose();
     clearScore();
+    resetTimer(STAGES[state.stageIndex].timeLimit);
   });
 
-  scoreButton.addEventListener("click", () => {
-    const score = scoreLigand();
-    renderScore(score);
-  });
+  scoreButton.addEventListener("click", doJudge);
+  scoreButtonFloat.addEventListener("click", doJudge);
 
   hintButton.addEventListener("click", () => {
     state.showHints = !state.showHints;
@@ -111,18 +226,21 @@ function bindEvents() {
   });
 
   depthSlider.addEventListener("input", () => {
-    state.pose.tz = Number(depthSlider.value) + 19;
+    maybeStartTimer();
+    state.pose.tz = state.depthBase + Number(depthSlider.value);
     redrawSceneExtras();
   });
 
   interactionLayer.addEventListener("wheel", (event) => {
     if (state.mode !== "move") return;
     event.preventDefault();
+    maybeStartTimer();
     moveAlongNearestSurface(event.deltaY > 0 ? -2.0 : 2.0);
     redrawSceneExtras();
   }, { passive: false });
 
   interactionLayer.addEventListener("pointerdown", (event) => {
+    maybeStartTimer();
     state.dragging = true;
     state.last = { x: event.clientX, y: event.clientY };
     interactionLayer.classList.add("dragging");
@@ -140,6 +258,7 @@ function bindEvents() {
       state.pose.tx += offset.x;
       state.pose.ty += offset.y;
       state.pose.tz += offset.z;
+      syncDepthSlider();
     } else if (state.mode === "rotate") {
       state.pose.ry += dx * 0.018;
       state.pose.rx += dy * 0.018;
@@ -155,6 +274,7 @@ function bindEvents() {
 
   document.querySelectorAll("[data-nudge]").forEach((button) => {
     button.addEventListener("click", () => {
+      maybeStartTimer();
       const action = button.dataset.nudge;
       if (action === "up") moveByScreenOffset(0, -28);
       if (action === "down") moveByScreenOffset(0, 28);
@@ -162,10 +282,12 @@ function bindEvents() {
       if (action === "right") moveByScreenOffset(28, 0);
       if (action === "snap") snapLigandToSurface(7.0);
       if (action === "out") snapLigandToSurface(13.0);
-      depthSlider.value = String(Math.round(state.pose.tz - 19));
+      syncDepthSlider();
       redrawSceneExtras();
     });
   });
+
+  window.addEventListener("resize", () => resizeConfetti());
 }
 
 function setMode(mode) {
@@ -176,22 +298,33 @@ function setMode(mode) {
   interactionLayer.classList.toggle("active", mode !== "view");
   if (mode === "view") message.textContent = "タンパク質を回して、くぼみの位置を探してください。";
   if (mode === "move") message.textContent = "ドラッグで見た目どおりに移動します。ホイールで表面へ近づけたり離したりできます。";
-  if (mode === "rotate") message.textContent = "ドラッグでカテキンの向きを変えます。";
+  if (mode === "rotate") message.textContent = "ドラッグで低分子の向きを変えます。";
 }
 
-function resetPose() {
-  state.pose = {
-    tx: 76,
-    ty: 47,
-    tz: 24,
+function defaultPose() {
+  const dir = normalize({ x: 1, y: 0.35, z: 0.2 });
+  const reach = state.proteinRadius + 10;
+  return {
+    tx: state.proteinCenter.x + dir.x * reach,
+    ty: state.proteinCenter.y + dir.y * reach,
+    tz: state.proteinCenter.z + dir.z * reach,
     rx: 0.2,
     ry: -0.6,
     rz: 0.1,
   };
-  depthSlider.value = "0";
+}
+
+function resetPose() {
+  state.pose = defaultPose();
   snapLigandToSurface(13.0);
-  depthSlider.value = String(Math.round(state.pose.tz - 19));
+  state.depthBase = state.pose.tz;
+  depthSlider.value = "0";
   redrawSceneExtras();
+}
+
+function syncDepthSlider() {
+  const offset = clamp(Math.round(state.pose.tz - state.depthBase), -35, 35);
+  depthSlider.value = String(offset);
 }
 
 function moveByScreenOffset(dx, dy) {
@@ -249,7 +382,7 @@ function moveAlongNearestSurface(amount) {
   state.pose.tx += direction.x * amount;
   state.pose.ty += direction.y * amount;
   state.pose.tz += direction.z * amount;
-  depthSlider.value = String(Math.round(state.pose.tz - 19));
+  syncDepthSlider();
 }
 
 function nearestProteinAtom(point) {
@@ -290,6 +423,7 @@ function drawLigand() {
   for (const bond of state.ligandTemplate.bonds) {
     const a = atoms[bond.a - 1];
     const b = atoms[bond.b - 1];
+    if (!a || !b) continue;
     const radius = bond.order > 1 ? 0.11 : 0.09;
     state.viewer.addCylinder({
       start: { x: a.x, y: a.y, z: a.z },
@@ -425,6 +559,7 @@ function rotatePoint(point, rx, ry, rz) {
 }
 
 function scoreLigand() {
+  const heavy = state.ligandHeavyCount;
   const ligandAtoms = transformedLigandAtoms().filter((atom) => atom.element !== "H");
   let collisions = 0;
   let contacts = 0;
@@ -443,17 +578,20 @@ function scoreLigand() {
     }
   }
 
-  if (minDistance > 7.5 || contacts < 8) {
+  const minContacts = Math.max(4, Math.round(heavy * 0.35));
+  const collisionCap = Math.round(heavy * 1.9);
+
+  if (minDistance > 8.5 || contacts < minContacts) {
     return zeroScore("外れています", { minDistance, collisions, severeCollisions, contacts, shellAtoms });
   }
-  if (severeCollisions > 2 || collisions > 22) {
+  if (severeCollisions > 3 || collisions > collisionCap) {
     return zeroScore("内部に埋もれすぎ", { minDistance, collisions, severeCollisions, contacts, shellAtoms });
   }
 
-  const enclosureScore = Math.round(clamp(shellAtoms / 16, 0, 45));
-  const contactScore = Math.round(clamp(contacts / 7, 0, 35));
-  const collisionScore = Math.round(clamp(20 - collisions * 1.8 - severeCollisions * 5, 0, 20));
-  if (contactScore < 8) {
+  const enclosureScore = Math.round(clamp(shellAtoms / (heavy * 0.85), 0, 45));
+  const contactScore = Math.round(clamp(contacts / (heavy * 0.38), 0, 35));
+  const collisionScore = Math.round(clamp(20 - collisions * 1.4 - severeCollisions * 4, 0, 20));
+  if (contactScore < 5) {
     return zeroScore("外れています", { minDistance, collisions, severeCollisions, contacts, shellAtoms });
   }
   if (collisionScore === 0) {
@@ -499,24 +637,54 @@ function countLigandCollisions() {
   return collisions;
 }
 
+function doJudge() {
+  ensureAudio();
+  const score = scoreLigand();
+  renderScore(score);
+}
+
 function renderScore(score) {
   scoreNumber.textContent = String(score.total);
   scoreLabel.textContent = score.reason;
+  floatScoreNum.textContent = String(score.total);
+  floatScoreLabel.textContent = score.reason;
   enclosureScoreEl.textContent = `${score.enclosureScore}/45`;
   collisionScoreEl.textContent = `${score.collisionScore}/20`;
   contactScoreEl.textContent = `${score.contactScore}/35`;
   if (score.total === 0) {
+    playFail();
     message.textContent = score.reason === "外れています"
-      ? "カテキンが表面から離れすぎています。表面へ吸着してから、くぼみの近くへ動かしてください。"
-      : "カテキンがタンパク質の内部に入り込みすぎています。外へ出してから置き直してください。";
+      ? "低分子が表面から離れすぎています。表面へ吸着してから、くぼみの近くへ動かしてください。"
+      : "低分子がタンパク質の内部に入り込みすぎています。外へ出してから置き直してください。";
     return;
   }
+  if (score.total >= CLEAR_THRESHOLD) {
+    const stage = STAGES[state.stageIndex];
+    const firstClear = !state.cleared[stage.id];
+    state.cleared[stage.id] = true;
+    const clearTime = state.timerRunning ? state.timeLimit - state.timeLeft : null;
+    const updated = recordResult(stage.id, score.total, clearTime);
+    stopTimer();
+    updateStageButtons();
+    renderRecords();
+    celebrate(score.total, firstClear);
+    let note = firstClear
+      ? "ステージクリア！ 別のステージや低分子にも挑戦してみよう。"
+      : "きれいにハマりました。さらに高得点を狙えるかも。";
+    if (updated.newBestScore) note = "ハイスコア更新！ " + note;
+    else if (updated.newBestTime) note = "ベストタイム更新！ " + note;
+    message.textContent = note;
+    return;
+  }
+  playFail();
   message.textContent = "表面に近く、めり込みが少なく、周囲にタンパク質がある配置ほど高得点です。";
 }
 
 function clearScore() {
   scoreNumber.textContent = "--";
   scoreLabel.textContent = "まだ判定していません";
+  floatScoreNum.textContent = "--";
+  floatScoreLabel.textContent = "判定を押してね";
   enclosureScoreEl.textContent = "--";
   collisionScoreEl.textContent = "--";
   contactScoreEl.textContent = "--";
@@ -524,10 +692,10 @@ function clearScore() {
 }
 
 function labelForScore(score, collisions, severeCollisions) {
-  if (severeCollisions > 0 || collisions > 10) return "少しめり込み";
-  if (score >= 82) return "かなりハマっている";
-  if (score >= 62) return "入りそう";
-  if (score >= 40) return "浅く接触している";
+  if (severeCollisions > 1 || collisions > 14) return "少しめり込み";
+  if (score >= 80) return "かなりハマっている";
+  if (score >= 50) return "入りそう";
+  if (score >= 35) return "あと少し";
   return "別のくぼみを探そう";
 }
 
@@ -568,10 +736,233 @@ function centroid(points) {
   };
 }
 
+function boundingRadius(points, center) {
+  let max = 0;
+  for (const point of points) {
+    const d = distance3d(point, center);
+    if (d > max) max = d;
+  }
+  return max;
+}
+
 function distance3d(a, b) {
   return Math.hypot(a.x - b.x, a.y - b.y, a.z - b.z);
 }
 
 function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
+}
+
+// --- 制限時間 ---
+
+function formatTime(seconds) {
+  const s = Math.max(0, Math.round(seconds));
+  const m = Math.floor(s / 60);
+  const r = s % 60;
+  return `${m}:${String(r).padStart(2, "0")}`;
+}
+
+function resetTimer(limit) {
+  stopTimer();
+  state.timeLimit = limit;
+  state.timeLeft = limit;
+  state.timerRunning = false;
+  state.timedOut = false;
+  hudTimerEl.classList.remove("running", "low", "timeout");
+  hudTimerValueEl.textContent = formatTime(limit);
+}
+
+function maybeStartTimer() {
+  if (state.timerRunning || state.timedOut) return;
+  state.timerRunning = true;
+  hudTimerEl.classList.add("running");
+  state.timer = window.setInterval(tickTimer, 1000);
+}
+
+function tickTimer() {
+  state.timeLeft -= 1;
+  if (state.timeLeft <= 10) hudTimerEl.classList.add("low");
+  hudTimerValueEl.textContent = formatTime(state.timeLeft);
+  if (state.timeLeft <= 0) onTimeout();
+}
+
+function stopTimer() {
+  if (state.timer) window.clearInterval(state.timer);
+  state.timer = null;
+  state.timerRunning = false;
+}
+
+function onTimeout() {
+  stopTimer();
+  state.timedOut = true;
+  state.timeLeft = 0;
+  hudTimerValueEl.textContent = "0:00";
+  hudTimerEl.classList.remove("running", "low");
+  hudTimerEl.classList.add("timeout");
+  playFail();
+  message.textContent = "時間切れ！ リセットしてもう一度挑戦しよう。";
+}
+
+// --- ハイスコア記録（localStorage） ---
+
+function loadRecords() {
+  try {
+    const raw = window.localStorage.getItem(RECORDS_KEY);
+    return raw ? JSON.parse(raw) : {};
+  } catch (error) {
+    return {};
+  }
+}
+
+function saveRecords() {
+  try {
+    window.localStorage.setItem(RECORDS_KEY, JSON.stringify(state.records));
+  } catch (error) {
+    // localStorageが使えない環境では記録を保持しないだけ
+  }
+}
+
+function recordResult(stageId, score, clearTimeSec) {
+  const current = state.records[stageId] || { bestScore: 0, bestTimeSec: null };
+  const result = { newBestScore: false, newBestTime: false };
+  if (score > current.bestScore) {
+    current.bestScore = score;
+    result.newBestScore = true;
+  }
+  if (clearTimeSec != null && (current.bestTimeSec == null || clearTimeSec < current.bestTimeSec)) {
+    current.bestTimeSec = clearTimeSec;
+    result.newBestTime = true;
+  }
+  state.records[stageId] = current;
+  saveRecords();
+  return result;
+}
+
+function renderRecords() {
+  const stage = STAGES[state.stageIndex];
+  const record = state.records[stage.id];
+  bestScoreEl.textContent = record && record.bestScore ? String(record.bestScore) : "--";
+  bestTimeEl.textContent = record && record.bestTimeSec != null ? formatTime(record.bestTimeSec) : "--";
+}
+
+// --- 成功演出（音・紙吹雪・回転） ---
+
+function ensureAudio() {
+  if (state.audioCtx) return;
+  const Ctx = window.AudioContext || window.webkitAudioContext;
+  if (!Ctx) return;
+  state.audioCtx = new Ctx();
+}
+
+function playTone(frequency, startOffset, duration, gainPeak) {
+  const ctx = state.audioCtx;
+  if (!ctx) return;
+  const now = ctx.currentTime + startOffset;
+  const osc = ctx.createOscillator();
+  const gain = ctx.createGain();
+  osc.type = "triangle";
+  osc.frequency.value = frequency;
+  gain.gain.setValueAtTime(0.0001, now);
+  gain.gain.exponentialRampToValueAtTime(gainPeak, now + 0.02);
+  gain.gain.exponentialRampToValueAtTime(0.0001, now + duration);
+  osc.connect(gain).connect(ctx.destination);
+  osc.start(now);
+  osc.stop(now + duration + 0.05);
+}
+
+function playSuccess(total) {
+  ensureAudio();
+  if (!state.audioCtx) return;
+  if (state.audioCtx.state === "suspended") state.audioCtx.resume();
+  const notes = total >= 82 ? [523.25, 659.25, 783.99, 1046.5] : [523.25, 659.25, 783.99];
+  notes.forEach((freq, i) => playTone(freq, i * 0.12, 0.5, 0.22));
+}
+
+function playFail() {
+  ensureAudio();
+  if (!state.audioCtx) return;
+  if (state.audioCtx.state === "suspended") state.audioCtx.resume();
+  playTone(220, 0, 0.18, 0.14);
+  playTone(174.6, 0.14, 0.24, 0.14);
+}
+
+function celebrate(total, firstClear) {
+  playSuccess(total);
+  [scoreNumber, floatScoreNum].forEach((el) => {
+    el.classList.remove("celebrate");
+    void el.offsetWidth;
+    el.classList.add("celebrate");
+  });
+
+  celebrateBanner.textContent = total >= 82 ? "ピッタリ！" : "ナイスドッキング！";
+  celebrateBanner.classList.remove("show");
+  void celebrateBanner.offsetWidth;
+  celebrateBanner.classList.add("show");
+
+  launchConfetti(firstClear ? 160 : 90);
+
+  if (state.viewer && typeof state.viewer.spin === "function") {
+    state.viewer.spin("y", 1);
+    window.setTimeout(() => state.viewer.spin(false), 2200);
+  }
+}
+
+let confettiRaf = null;
+
+function resizeConfetti() {
+  const rect = confettiCanvas.getBoundingClientRect();
+  confettiCanvas.width = Math.max(1, Math.floor(rect.width));
+  confettiCanvas.height = Math.max(1, Math.floor(rect.height));
+}
+
+function launchConfetti(count) {
+  resizeConfetti();
+  const ctx = confettiCanvas.getContext("2d");
+  if (!ctx) return;
+  const colors = ["#f3b23c", "#52d185", "#5fa8ff", "#e65a4f", "#f6f2ea"];
+  const w = confettiCanvas.width;
+  const h = confettiCanvas.height;
+  const particles = [];
+  for (let i = 0; i < count; i++) {
+    particles.push({
+      x: Math.random() * w,
+      y: -20 - Math.random() * h * 0.4,
+      vx: (Math.random() - 0.5) * 3,
+      vy: 2 + Math.random() * 3.5,
+      size: 4 + Math.random() * 5,
+      color: colors[Math.floor(Math.random() * colors.length)],
+      rot: Math.random() * Math.PI,
+      vr: (Math.random() - 0.5) * 0.3,
+    });
+  }
+
+  confettiCanvas.classList.add("show");
+  const start = performance.now();
+  if (confettiRaf) cancelAnimationFrame(confettiRaf);
+
+  function frame(now) {
+    const elapsed = now - start;
+    ctx.clearRect(0, 0, w, h);
+    for (const p of particles) {
+      p.x += p.vx;
+      p.y += p.vy;
+      p.vy += 0.05;
+      p.rot += p.vr;
+      ctx.save();
+      ctx.translate(p.x, p.y);
+      ctx.rotate(p.rot);
+      ctx.fillStyle = p.color;
+      ctx.globalAlpha = clamp(1 - elapsed / 2200, 0, 1);
+      ctx.fillRect(-p.size / 2, -p.size / 2, p.size, p.size * 0.6);
+      ctx.restore();
+    }
+    if (elapsed < 2200) {
+      confettiRaf = requestAnimationFrame(frame);
+    } else {
+      ctx.clearRect(0, 0, w, h);
+      confettiCanvas.classList.remove("show");
+      confettiRaf = null;
+    }
+  }
+  confettiRaf = requestAnimationFrame(frame);
 }
