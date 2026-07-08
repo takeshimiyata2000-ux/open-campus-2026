@@ -312,6 +312,16 @@ h2 {
   background: rgba(82, 209, 133, 0.14);
 }
 
+#spotHintButton {
+  border-color: #e65a4f;
+  color: #ff7b72;
+  font-weight: 700;
+}
+
+#spotHintButton:hover {
+  background: rgba(230, 90, 79, 0.14);
+}
+
 .stage-grid {
   margin-bottom: 12px;
 }

@@ -9,6 +9,7 @@ const floatScoreNum = document.getElementById("floatScoreNum");
 const floatScoreLabel = document.getElementById("floatScoreLabel");
 const hintButton = document.getElementById("hintButton");
 const answerButton = document.getElementById("answerButton");
+const spotHintButton = document.getElementById("spotHintButton");
 const stageButtonsEl = document.getElementById("stageButtons");
 const stageBlurbEl = document.getElementById("stageBlurb");
 const proteinNameEl = document.getElementById("proteinName");
@@ -103,6 +104,7 @@ const state = {
   pocketHints: [],
   answerSites: [],
   answerMarker: null,
+  spotHint: null,
   cleared: {},
   records: {},
   leaderboard: [],
@@ -167,6 +169,7 @@ async function loadStage(index) {
       ? []
       : parseAnswerSites(cifText, stage.answerKind);
     state.answerMarker = null;
+    state.spotHint = null;
     state.ligandTemplate = parseSdf(sdfText);
     state.ligandHeavyCount = Math.max(
       6,
@@ -254,6 +257,7 @@ function bindEvents() {
   });
 
   answerButton.addEventListener("click", showAnswer);
+  spotHintButton.addEventListener("click", showSpotHint);
 
   depthSlider.addEventListener("input", () => {
     maybeStartTimer();
@@ -344,6 +348,7 @@ function defaultPose() {
 
 function resetPose() {
   state.answerMarker = null;
+  state.spotHint = null;
   state.pose = defaultPose();
   snapLigandToSurface(13.0);
   state.depthBase = state.pose.tz;
@@ -443,6 +448,7 @@ function redrawSceneExtras() {
   if (typeof state.viewer.removeAllLabels === "function") state.viewer.removeAllLabels();
   if (state.showHints) drawPocketHints();
   if (state.answerMarker) drawAnswerMarker();
+  if (state.spotHint) drawSpotHint();
   drawLigand();
   state.viewer.render();
 }
@@ -653,20 +659,48 @@ function seatLigandAt(site) {
 }
 
 function drawAnswerMarker() {
-  // 分子に重なる文字ラベルは出さず、シアン色の球でお手本位置を示す
-  state.viewer.addSphere({
-    center: state.answerMarker,
-    radius: 4.2,
-    color: "0x5fd0ff",
-    alpha: 0.22,
-  });
+  // ワイヤーフレームのみ（塗りつぶし球はsurface内部で黒く見えるため使わない）
   state.viewer.addSphere({
     center: state.answerMarker,
     radius: 4.6,
     color: "0x5fd0ff",
-    alpha: 0.5,
+    alpha: 0.6,
     wireframe: true,
   });
+}
+
+function drawSpotHint() {
+  // 「ここだよ！」の赤い場所ヒント（ワイヤーフレームで黒球化を回避）
+  state.viewer.addSphere({
+    center: state.spotHint,
+    radius: 5.0,
+    color: "0xff4d4d",
+    alpha: 0.65,
+    wireframe: true,
+  });
+}
+
+function showSpotHint() {
+  const stage = STAGES[state.stageIndex];
+  spotHintButton.disabled = true;
+  message.textContent = "ヒントを準備中…";
+  setTimeout(() => {
+    if (stage.answerKind === "pocket" && !state.answerSites.length) {
+      state.answerSites = computeGoodPockets(5);
+    }
+    if (!state.answerSites.length) {
+      message.textContent = "ヒント位置が見つかりませんでした。";
+      spotHintButton.disabled = false;
+      return;
+    }
+    const site = stage.answerKind === "pocket"
+      ? state.answerSites[0]
+      : state.answerSites[Math.floor(Math.random() * state.answerSites.length)];
+    state.spotHint = site;
+    redrawSceneExtras();
+    message.textContent = "赤い印のあたりに低分子を動かしてみよう！ 場所が合えば得点が上がります。";
+    spotHintButton.disabled = false;
+  }, 20);
 }
 
 function parseCifAtoms(text) {
