@@ -33,11 +33,19 @@ const enclosureScoreEl = document.getElementById("enclosureScore");
 const collisionScoreEl = document.getElementById("collisionScore");
 const contactScoreEl = document.getElementById("contactScore");
 const message = document.getElementById("message");
+const nameEntryModal = document.getElementById("nameEntryModal");
+const nameEntryConfirm = document.getElementById("nameEntryConfirm");
+const nameEntrySkip = document.getElementById("nameEntrySkip");
+const nameLetterEls = [
+  document.getElementById("nameLetter0"),
+  document.getElementById("nameLetter1"),
+  document.getElementById("nameLetter2"),
+];
 
 const CLEAR_THRESHOLD = 50;
 const RECORDS_KEY = "pocketGame.records.v1";
 const LEADERBOARD_KEY = "pocketGame.leaderboard.v1";
-const LEADERBOARD_MAX = 8;
+const LEADERBOARD_MAX = 5;
 
 const STAGES = [
   {
@@ -107,7 +115,8 @@ const state = {
   spotHint: null,
   cleared: {},
   records: {},
-  leaderboard: [],
+  leaderboard: {},
+  nameEntry: null,
   depthBase: 0,
   mode: "view",
   showHints: false,
@@ -318,6 +327,15 @@ function bindEvents() {
       redrawSceneExtras();
     });
   });
+
+  document.querySelectorAll(".letter-up").forEach((button) => {
+    button.addEventListener("click", () => cycleNameLetter(Number(button.dataset.slot), 1));
+  });
+  document.querySelectorAll(".letter-down").forEach((button) => {
+    button.addEventListener("click", () => cycleNameLetter(Number(button.dataset.slot), -1));
+  });
+  nameEntryConfirm.addEventListener("click", confirmNameEntry);
+  nameEntrySkip.addEventListener("click", skipNameEntry);
 
   window.addEventListener("resize", () => resizeConfetti());
 }
@@ -795,6 +813,36 @@ function rotatePoint(point, rx, ry, rz) {
   };
 }
 
+function hasSolventAccess(ligandAtoms) {
+  // 低分子の重心から「タンパク質中心の反対方向＝想定される溶媒側」へ抜けられるかを確認する。
+  // 直接の原子衝突（collisions/severeCollisions）がなくても、その先まで
+  // タンパク質原子で埋め尽くされている場合は「表面のくぼみ」ではなく
+  // 「内部に完全に埋もれた空隙」とみなし、高得点にならないようにする。
+  const ligandCenter = centroid(ligandAtoms);
+  const outward = normalize({
+    x: ligandCenter.x - state.proteinCenter.x,
+    y: ligandCenter.y - state.proteinCenter.y,
+    z: ligandCenter.z - state.proteinCenter.z,
+  });
+  // タンパク質のほぼ中心＝内部の芯にいる場合は方向が定まらないため、抜け道なしとみなす
+  if (outward.x === 0 && outward.y === 0 && outward.z === 0) return false;
+
+  const reach = (state.ligandMaxRadius || 6) + 6;
+  const escapePoint = {
+    x: ligandCenter.x + outward.x * reach,
+    y: ligandCenter.y + outward.y * reach,
+    z: ligandCenter.z + outward.z * reach,
+  };
+  let nearby = 0;
+  for (const atom of state.proteinAtoms) {
+    if (distance3d(atom, escapePoint) < 5) {
+      nearby += 1;
+      if (nearby > 6) return false;
+    }
+  }
+  return true;
+}
+
 function scoreLigand() {
   const heavy = state.ligandHeavyCount;
   const ligandAtoms = transformedLigandAtoms().filter((atom) => atom.element !== "H");
@@ -822,6 +870,9 @@ function scoreLigand() {
     return zeroScore("外れています", { minDistance, collisions, severeCollisions, contacts, shellAtoms });
   }
   if (severeCollisions > 3 || collisions > collisionCap) {
+    return zeroScore("内部に埋もれすぎ", { minDistance, collisions, severeCollisions, contacts, shellAtoms });
+  }
+  if (!hasSolventAccess(ligandAtoms)) {
     return zeroScore("内部に埋もれすぎ", { minDistance, collisions, severeCollisions, contacts, shellAtoms });
   }
 
@@ -902,11 +953,9 @@ function renderScore(score) {
     state.cleared[stage.id] = true;
     const clearTime = state.timerRunning ? state.timeLimit - state.timeLeft : null;
     const updated = recordResult(stage.id, score.total, clearTime);
-    addToLeaderboard(stage.title, score.total, clearTime);
     stopTimer();
     updateStageButtons();
     renderRecords();
-    renderLeaderboard();
     celebrate(score.total, firstClear);
     let note = firstClear
       ? "ステージクリア！ 別のステージや低分子にも挑戦してみよう。"
@@ -914,6 +963,9 @@ function renderScore(score) {
     if (updated.newBestScore) note = "ハイスコア更新！ " + note;
     else if (updated.newBestTime) note = "ベストタイム更新！ " + note;
     message.textContent = note;
+    if (qualifiesForLeaderboard(stage.id, score.total, clearTime)) {
+      openNameEntry(stage.id, score.total, clearTime);
+    }
     return;
   }
   playFail();
@@ -1092,15 +1144,39 @@ function clearSessionRecords() {
   renderRecords();
 }
 
-// --- ランキング（消えない最高記録） ---
+// --- ランキング（ステージ別・消えない最高記録） ---
+
+function sortLeaderboardEntries(entries) {
+  entries.sort((a, b) => {
+    if (b.score !== a.score) return b.score - a.score;
+    const ta = a.timeSec == null ? Infinity : a.timeSec;
+    const tb = b.timeSec == null ? Infinity : b.timeSec;
+    return ta - tb;
+  });
+  return entries;
+}
 
 function loadLeaderboard() {
   try {
     const raw = window.localStorage.getItem(LEADERBOARD_KEY);
-    const list = raw ? JSON.parse(raw) : [];
-    return Array.isArray(list) ? list : [];
+    const data = raw ? JSON.parse(raw) : null;
+    if (Array.isArray(data)) {
+      // 旧形式（全ステージ混在の配列）をステージ別オブジェクトへ変換
+      const migrated = {};
+      for (const entry of data) {
+        const stage = STAGES.find((s) => s.title === entry.stage);
+        const key = stage ? stage.id : entry.stage;
+        if (!migrated[key]) migrated[key] = [];
+        migrated[key].push({ score: entry.score, timeSec: entry.timeSec == null ? null : entry.timeSec });
+      }
+      for (const key of Object.keys(migrated)) {
+        migrated[key] = sortLeaderboardEntries(migrated[key]).slice(0, LEADERBOARD_MAX);
+      }
+      return migrated;
+    }
+    return data && typeof data === "object" ? data : {};
   } catch (error) {
-    return [];
+    return {};
   }
 }
 
@@ -1112,43 +1188,122 @@ function saveLeaderboard() {
   }
 }
 
-function addToLeaderboard(stageTitle, score, timeSec) {
-  state.leaderboard.push({ stage: stageTitle, score, timeSec: timeSec == null ? null : timeSec });
-  state.leaderboard.sort((a, b) => {
-    if (b.score !== a.score) return b.score - a.score;
-    const ta = a.timeSec == null ? Infinity : a.timeSec;
-    const tb = b.timeSec == null ? Infinity : b.timeSec;
-    return ta - tb;
+function addToLeaderboard(stageId, score, timeSec, name) {
+  if (!Array.isArray(state.leaderboard[stageId])) {
+    state.leaderboard[stageId] = [];
+  }
+  state.leaderboard[stageId].push({
+    score,
+    timeSec: timeSec == null ? null : timeSec,
+    name: name ? String(name).slice(0, 3) : null,
   });
-  state.leaderboard = state.leaderboard.slice(0, LEADERBOARD_MAX);
+  state.leaderboard[stageId] = sortLeaderboardEntries(state.leaderboard[stageId]).slice(0, LEADERBOARD_MAX);
   saveLeaderboard();
+}
+
+function qualifiesForLeaderboard(stageId, score, timeSec) {
+  const entries = state.leaderboard[stageId] || [];
+  if (entries.length < LEADERBOARD_MAX) return true;
+  const worst = entries[entries.length - 1];
+  if (score !== worst.score) return score > worst.score;
+  if (timeSec == null) return false;
+  if (worst.timeSec == null) return true;
+  return timeSec < worst.timeSec;
 }
 
 function renderLeaderboard() {
   leaderboardEl.innerHTML = "";
-  if (!state.leaderboard.length) {
-    const li = document.createElement("li");
-    li.className = "empty";
-    li.textContent = "まだ記録がありません";
-    leaderboardEl.appendChild(li);
-    return;
-  }
-  for (const entry of state.leaderboard) {
-    const li = document.createElement("li");
-    const stageSpan = document.createElement("span");
-    stageSpan.className = "lb-stage";
-    stageSpan.textContent = entry.stage;
-    const scoreSpan = document.createElement("span");
-    scoreSpan.className = "lb-score";
-    scoreSpan.textContent = `${entry.score}点`;
-    const timeSpan = document.createElement("span");
-    timeSpan.className = "lb-time";
-    timeSpan.textContent = entry.timeSec == null ? "" : formatTime(entry.timeSec);
-    li.appendChild(stageSpan);
-    li.appendChild(scoreSpan);
-    li.appendChild(timeSpan);
-    leaderboardEl.appendChild(li);
-  }
+  STAGES.forEach((stage) => {
+    const group = document.createElement("div");
+    group.className = "leaderboard-group";
+
+    const heading = document.createElement("h3");
+    heading.textContent = stage.title;
+    group.appendChild(heading);
+
+    const list = document.createElement("ol");
+    list.className = "leaderboard";
+    const entries = state.leaderboard[stage.id] || [];
+
+    if (!entries.length) {
+      const li = document.createElement("li");
+      li.className = "empty";
+      li.textContent = "まだ記録がありません";
+      list.appendChild(li);
+    } else {
+      for (const entry of entries) {
+        const li = document.createElement("li");
+        if (entry.name) {
+          const nameSpan = document.createElement("span");
+          nameSpan.className = "lb-name";
+          nameSpan.textContent = entry.name;
+          li.appendChild(nameSpan);
+        }
+        const scoreSpan = document.createElement("span");
+        scoreSpan.className = "lb-score";
+        scoreSpan.textContent = `${entry.score}点`;
+        const timeSpan = document.createElement("span");
+        timeSpan.className = "lb-time";
+        timeSpan.textContent = entry.timeSec == null ? "" : formatTime(entry.timeSec);
+        li.appendChild(scoreSpan);
+        li.appendChild(timeSpan);
+        list.appendChild(li);
+      }
+    }
+
+    group.appendChild(list);
+    leaderboardEl.appendChild(group);
+  });
+}
+
+// --- 名前登録（レトロアーケード風の3文字イニシャル入力） ---
+
+const NAME_LETTERS = " ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("");
+
+function openNameEntry(stageId, score, timeSec) {
+  state.nameEntry = { stageId, score, timeSec, letters: ["A", "A", "A"] };
+  renderNameEntryLetters();
+  nameEntryModal.classList.remove("hidden");
+}
+
+function closeNameEntry() {
+  nameEntryModal.classList.add("hidden");
+  state.nameEntry = null;
+}
+
+function renderNameEntryLetters() {
+  if (!state.nameEntry) return;
+  nameLetterEls.forEach((el, i) => {
+    const letter = state.nameEntry.letters[i];
+    el.textContent = letter === " " ? "_" : letter;
+  });
+}
+
+function cycleNameLetter(slot, dir) {
+  if (!state.nameEntry) return;
+  const current = state.nameEntry.letters[slot];
+  let idx = NAME_LETTERS.indexOf(current);
+  if (idx < 0) idx = 0;
+  idx = (idx + dir + NAME_LETTERS.length) % NAME_LETTERS.length;
+  state.nameEntry.letters[slot] = NAME_LETTERS[idx];
+  renderNameEntryLetters();
+}
+
+function confirmNameEntry() {
+  if (!state.nameEntry) return;
+  const { stageId, score, timeSec, letters } = state.nameEntry;
+  const name = letters.join("").trim();
+  addToLeaderboard(stageId, score, timeSec, name || null);
+  renderLeaderboard();
+  closeNameEntry();
+}
+
+function skipNameEntry() {
+  if (!state.nameEntry) return;
+  const { stageId, score, timeSec } = state.nameEntry;
+  addToLeaderboard(stageId, score, timeSec, null);
+  renderLeaderboard();
+  closeNameEntry();
 }
 
 // --- 成功演出（音・紙吹雪・回転） ---
