@@ -90,6 +90,21 @@ const STAGES = [
     answerKind: "ctb",
     answerNote: "実際のGM1結合部位の1つです。コレラトキシンには5か所あり、毎回ランダムに表示します。",
   },
+  {
+    id: "blg-retinol",
+    title: "4. ビタミンA",
+    protein: "../pdb_cache/1gx8.cif",
+    proteinName: "β-ラクトグロブリン（乳清タンパク質）",
+    ligand: "ligands/retinol.sdf",
+    ligandName: "レチノール（ビタミンA）",
+    blurb: "牛乳の乳清タンパク質β-ラクトグロブリンは、深い袋状ポケットにビタミンAなどの脂溶性分子を包んで運ぶ。レチノールをポケットへ収めよう。",
+    mission: "ミッション: レチノールをβ-ラクトグロブリンの袋状ポケットに収めて 50点以上でクリア！",
+    timeLimit: 180,
+    clearThreshold: 50,
+    answerKind: "hetsite",
+    hetCode: "RTL",
+    answerNote: "実際にレチノールが結合している袋状ポケット（カリックス）です。深いポケットなのできれいに収まります。",
+  },
 ];
 
 const atomColors = {
@@ -128,7 +143,7 @@ const state = {
   timerRunning: false,
   timedOut: false,
   last: { x: 0, y: 0 },
-  pose: { tx: 0, ty: 0, tz: 0, rx: 0.2, ry: -0.6, rz: 0.1 },
+  pose: { tx: 0, ty: 0, tz: 0, R: [1, 0, 0, 0, 1, 0, 0, 0, 1] },
 };
 
 init();
@@ -176,7 +191,7 @@ async function loadStage(index) {
     // "pocket" は初回の「正解を見る」で高スコア地点を探索してキャッシュ（遅延計算）
     state.answerSites = stage.answerKind === "pocket"
       ? []
-      : parseAnswerSites(cifText, stage.answerKind);
+      : parseAnswerSites(cifText, stage.answerKind, stage.hetCode);
     state.answerMarker = null;
     state.spotHint = null;
     state.ligandTemplate = parseSdf(sdfText);
@@ -303,8 +318,7 @@ function bindEvents() {
       state.pose.tz += offset.z;
       syncDepthSlider();
     } else if (state.mode === "rotate") {
-      state.pose.ry += dx * 0.018;
-      state.pose.rx += dy * 0.018;
+      applyTrackball(dx, dy);
     }
     redrawSceneExtras();
   });
@@ -358,9 +372,7 @@ function defaultPose() {
     tx: state.proteinCenter.x + dir.x * reach,
     ty: state.proteinCenter.y + dir.y * reach,
     tz: state.proteinCenter.z + dir.z * reach,
-    rx: 0.2,
-    ry: -0.6,
-    rz: 0.1,
+    R: eulerToMatrix(0.2, -0.6, 0.1),
   };
 }
 
@@ -522,9 +534,29 @@ function drawPocketHints() {
 
 // --- 正解（実際の結合部位）機能 ---
 
-function parseAnswerSites(text, kind) {
+function parseAnswerSites(text, kind, hetCode) {
   const sites = [];
   const lines = text.split(/\r?\n/);
+  if (kind === "hetsite") {
+    // 指定したHETATM（結合しているリガンド）の位置＝実際の結合ポケット
+    const acc = {};
+    for (const line of lines) {
+      if (!line.startsWith("HETATM")) continue;
+      const c = line.trim().split(/\s+/);
+      if (c[5] !== hetCode) continue;
+      const key = c[6];
+      const a = acc[key] || (acc[key] = { x: 0, y: 0, z: 0, n: 0 });
+      a.x += Number(c[10]);
+      a.y += Number(c[11]);
+      a.z += Number(c[12]);
+      a.n += 1;
+    }
+    for (const key in acc) {
+      const a = acc[key];
+      if (a.n > 0) sites.push({ x: a.x / a.n, y: a.y / a.n, z: a.z / a.n });
+    }
+    return sites;
+  }
   if (kind === "iron") {
     for (const line of lines) {
       if (!line.startsWith("HETATM")) continue;
@@ -614,9 +646,7 @@ function computeGoodPockets(maxSites) {
     let best = -1;
     for (const dist of [4, 5.5]) {
       for (const ry of [0, 3.14]) {
-        state.pose.rx = 0.4;
-        state.pose.ry = ry;
-        state.pose.rz = 0;
+        state.pose.R = eulerToMatrix(0.4, ry, 0);
         state.pose.tx = seed.x + dir.x * dist;
         state.pose.ty = seed.y + dir.y * dist;
         state.pose.tz = seed.z + dir.z * dist;
@@ -653,9 +683,7 @@ function seatLigandAt(site) {
     for (const rx of [0, 1.57, 3.14, 4.71]) {
       for (const rz of [0, 1.6, 3.1]) {
         for (const dist of [2, 3, 4, 5, 6, 7]) {
-          state.pose.rx = rx;
-          state.pose.ry = ry;
-          state.pose.rz = rz;
+          state.pose.R = eulerToMatrix(rx, ry, rz);
           state.pose.tx = site.x + dir.x * dist;
           state.pose.ty = site.y + dir.y * dist;
           state.pose.tz = site.z + dir.z * dist;
@@ -664,7 +692,7 @@ function seatLigandAt(site) {
           const obj = sc.total - sc.collisions * 3 - sc.severeCollisions * 10;
           if (obj > bestScore) {
             bestScore = obj;
-            best = { rx, ry, rz, tx: state.pose.tx, ty: state.pose.ty, tz: state.pose.tz };
+            best = { R: state.pose.R, tx: state.pose.tx, ty: state.pose.ty, tz: state.pose.tz };
           }
         }
       }
@@ -780,7 +808,7 @@ function parseSdf(text) {
 
 function transformedLigandAtoms() {
   return state.ligandTemplate.atoms.map((atom) => {
-    const p = rotatePoint(atom, state.pose.rx, state.pose.ry, state.pose.rz);
+    const p = matVec(state.pose.R, atom);
     return {
       ...atom,
       x: p.x + state.pose.tx,
@@ -811,6 +839,83 @@ function rotatePoint(point, rx, ry, rz) {
     y: x2 * sz + y2 * cz,
     z: z2,
   };
+}
+
+// --- 回転（トラックボール）用の行列ユーティリティ ---
+
+function eulerToMatrix(rx, ry, rz) {
+  // rotatePoint と同じ姿勢を 3x3 行列（行優先）で表す
+  const c0 = rotatePoint({ x: 1, y: 0, z: 0 }, rx, ry, rz);
+  const c1 = rotatePoint({ x: 0, y: 1, z: 0 }, rx, ry, rz);
+  const c2 = rotatePoint({ x: 0, y: 0, z: 1 }, rx, ry, rz);
+  return [c0.x, c1.x, c2.x, c0.y, c1.y, c2.y, c0.z, c1.z, c2.z];
+}
+
+function matVec(m, v) {
+  return {
+    x: m[0] * v.x + m[1] * v.y + m[2] * v.z,
+    y: m[3] * v.x + m[4] * v.y + m[5] * v.z,
+    z: m[6] * v.x + m[7] * v.y + m[8] * v.z,
+  };
+}
+
+function matMul(a, b) {
+  const r = new Array(9);
+  for (let i = 0; i < 3; i++) {
+    for (let j = 0; j < 3; j++) {
+      r[i * 3 + j] = a[i * 3] * b[j] + a[i * 3 + 1] * b[3 + j] + a[i * 3 + 2] * b[6 + j];
+    }
+  }
+  return r;
+}
+
+function axisAngleToMatrix(ax, ay, az, angle) {
+  const len = Math.hypot(ax, ay, az) || 1;
+  ax /= len; ay /= len; az /= len;
+  const c = Math.cos(angle);
+  const s = Math.sin(angle);
+  const t = 1 - c;
+  return [
+    t * ax * ax + c, t * ax * ay - s * az, t * ax * az + s * ay,
+    t * ax * ay + s * az, t * ay * ay + c, t * ay * az - s * ax,
+    t * ax * az - s * ay, t * ay * az + s * ax, t * az * az + c,
+  ];
+}
+
+function cameraQuatConjugate() {
+  // 3Dmol のシーン回転クォータニオンを取得し、逆（共役）を返す
+  if (!state.viewer || typeof state.viewer.getView !== "function") return null;
+  const v = state.viewer.getView();
+  if (!v || v.length < 8) return null;
+  const qx = v[4], qy = v[5], qz = v[6], qw = v[7];
+  const n = Math.hypot(qx, qy, qz, qw) || 1;
+  return { x: -qx / n, y: -qy / n, z: -qz / n, w: qw / n };
+}
+
+function quatRotateVec(q, v) {
+  const tx = 2 * (q.y * v.z - q.z * v.y);
+  const ty = 2 * (q.z * v.x - q.x * v.z);
+  const tz = 2 * (q.x * v.y - q.y * v.x);
+  return {
+    x: v.x + q.w * tx + (q.y * tz - q.z * ty),
+    y: v.y + q.w * ty + (q.z * tx - q.x * tz),
+    z: v.z + q.w * tz + (q.x * ty - q.y * tx),
+  };
+}
+
+function applyTrackball(dx, dy) {
+  // ドラッグ方向を「画面基準の軸」に対応させて、低分子の中心まわりに自由回転する
+  let right = { x: 1, y: 0, z: 0 };
+  let up = { x: 0, y: 1, z: 0 };
+  const q = cameraQuatConjugate();
+  if (q) {
+    right = quatRotateVec(q, { x: 1, y: 0, z: 0 });
+    up = quatRotateVec(q, { x: 0, y: 1, z: 0 });
+  }
+  const speed = 0.01;
+  const rotYaw = axisAngleToMatrix(up.x, up.y, up.z, dx * speed);
+  const rotPitch = axisAngleToMatrix(right.x, right.y, right.z, dy * speed);
+  state.pose.R = matMul(matMul(rotPitch, rotYaw), state.pose.R);
 }
 
 function hasSolventAccess(ligandAtoms) {
