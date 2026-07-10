@@ -132,6 +132,7 @@ const state = {
   records: {},
   leaderboard: {},
   nameEntry: null,
+  nameEntryTimer: null,
   depthBase: 0,
   mode: "view",
   showHints: false,
@@ -174,6 +175,7 @@ async function loadStage(index) {
   if (!stage) return;
   state.stageIndex = index;
   stopTimer();
+  closeNameEntry();
   updateStageButtons();
   clearScore();
   message.textContent = "構造を読み込んでいます…";
@@ -269,6 +271,7 @@ function bindEvents() {
     clearScore();
     resetTimer(STAGES[state.stageIndex].timeLimit);
     clearSessionRecords();
+    closeNameEntry();
   });
 
   scoreButton.addEventListener("click", doJudge);
@@ -1069,7 +1072,7 @@ function renderScore(score) {
     else if (updated.newBestTime) note = "ベストタイム更新！ " + note;
     message.textContent = note;
     if (qualifiesForLeaderboard(stage.id, score.total, clearTime)) {
-      openNameEntry(stage.id, score.total, clearTime);
+      scheduleNameEntry(stage.id, score.total, clearTime);
     }
     return;
   }
@@ -1365,13 +1368,31 @@ function renderLeaderboard() {
 
 const NAME_LETTERS = " ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("");
 
+function scheduleNameEntry(stageId, score, timeSec) {
+  // 成功演出（紙吹雪・回転）が一段落してから、右パネルに登録欄を出す
+  clearNameEntryTimer();
+  state.nameEntryTimer = window.setTimeout(() => {
+    state.nameEntryTimer = null;
+    openNameEntry(stageId, score, timeSec);
+  }, 2600);
+}
+
+function clearNameEntryTimer() {
+  if (state.nameEntryTimer) {
+    window.clearTimeout(state.nameEntryTimer);
+    state.nameEntryTimer = null;
+  }
+}
+
 function openNameEntry(stageId, score, timeSec) {
   state.nameEntry = { stageId, score, timeSec, letters: ["A", "A", "A"] };
   renderNameEntryLetters();
   nameEntryModal.classList.remove("hidden");
+  nameEntryModal.scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
 function closeNameEntry() {
+  clearNameEntryTimer();
   nameEntryModal.classList.add("hidden");
   state.nameEntry = null;
 }

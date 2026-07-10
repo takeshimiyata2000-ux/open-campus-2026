@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>分子ドッキング ポケット探索ゲーム</title>
-    <link rel="stylesheet" href="styles.css?v=12">
+    <link rel="stylesheet" href="styles.css?v=13">
   </head>
   <body>
     <main class="app">
@@ -36,6 +36,34 @@
       </section>
 
       <aside class="control-panel">
+        <section id="nameEntryModal" class="name-entry-panel hidden" role="dialog" aria-label="ランキング名前登録">
+          <div class="name-entry-box">
+            <p class="name-entry-title">ランキング入り！</p>
+            <p class="name-entry-sub">名前を登録しよう（3文字・自由）</p>
+            <div class="name-entry-letters">
+              <div class="name-slot">
+                <button type="button" class="letter-up" data-slot="0" aria-label="1文字目を進める">▲</button>
+                <div class="letter-display" id="nameLetter0">A</div>
+                <button type="button" class="letter-down" data-slot="0" aria-label="1文字目を戻す">▼</button>
+              </div>
+              <div class="name-slot">
+                <button type="button" class="letter-up" data-slot="1" aria-label="2文字目を進める">▲</button>
+                <div class="letter-display" id="nameLetter1">A</div>
+                <button type="button" class="letter-down" data-slot="1" aria-label="2文字目を戻す">▼</button>
+              </div>
+              <div class="name-slot">
+                <button type="button" class="letter-up" data-slot="2" aria-label="3文字目を進める">▲</button>
+                <div class="letter-display" id="nameLetter2">A</div>
+                <button type="button" class="letter-down" data-slot="2" aria-label="3文字目を戻す">▼</button>
+              </div>
+            </div>
+            <div class="name-entry-actions">
+              <button type="button" id="nameEntryConfirm" class="primary">登録する</button>
+              <button type="button" id="nameEntrySkip">名前なしで登録</button>
+            </div>
+          </div>
+        </section>
+
         <section>
           <h2>ステージ</h2>
           <div id="stageButtons" class="stage-grid" role="group" aria-label="ステージ選択"></div>
@@ -120,35 +148,7 @@
       </aside>
     </main>
 
-    <div id="nameEntryModal" class="name-entry-modal hidden" role="dialog" aria-label="ランキング名前登録">
-      <div class="name-entry-box">
-        <p class="name-entry-title">ランキング入り！</p>
-        <p class="name-entry-sub">名前を登録しよう（3文字・自由）</p>
-        <div class="name-entry-letters">
-          <div class="name-slot">
-            <button type="button" class="letter-up" data-slot="0" aria-label="1文字目を進める">▲</button>
-            <div class="letter-display" id="nameLetter0">A</div>
-            <button type="button" class="letter-down" data-slot="0" aria-label="1文字目を戻す">▼</button>
-          </div>
-          <div class="name-slot">
-            <button type="button" class="letter-up" data-slot="1" aria-label="2文字目を進める">▲</button>
-            <div class="letter-display" id="nameLetter1">A</div>
-            <button type="button" class="letter-down" data-slot="1" aria-label="2文字目を戻す">▼</button>
-          </div>
-          <div class="name-slot">
-            <button type="button" class="letter-up" data-slot="2" aria-label="3文字目を進める">▲</button>
-            <div class="letter-display" id="nameLetter2">A</div>
-            <button type="button" class="letter-down" data-slot="2" aria-label="3文字目を戻す">▼</button>
-          </div>
-        </div>
-        <div class="name-entry-actions">
-          <button type="button" id="nameEntryConfirm" class="primary">登録する</button>
-          <button type="button" id="nameEntrySkip">名前なしで登録</button>
-        </div>
-      </div>
-    </div>
-
     <script src="3Dmol-min.js"></script>
-    <script src="app.js?v=25"></script>
+    <script src="app.js?v=26"></script>
   </body>
 </html>

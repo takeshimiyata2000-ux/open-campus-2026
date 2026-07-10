@@ -449,28 +449,29 @@ button.stage.active .stage-clear {
   font-variant-numeric: tabular-nums;
 }
 
-/* --- 名前入力モーダル（レトロアーケード風） --- */
+/* --- 名前入力（右パネル内・レトロアーケード風） --- */
 
-.name-entry-modal {
-  position: fixed;
-  inset: 0;
-  z-index: 50;
-  display: grid;
-  place-items: center;
-  background: rgba(8, 9, 10, 0.78);
-}
-
-.name-entry-modal.hidden {
+.name-entry-panel.hidden {
   display: none;
 }
 
+.name-entry-panel {
+  border-bottom: 0 !important;
+  padding-bottom: 0 !important;
+  animation: name-entry-in 0.4s ease;
+}
+
+@keyframes name-entry-in {
+  0% { opacity: 0; transform: translateY(-8px); }
+  100% { opacity: 1; transform: translateY(0); }
+}
+
 .name-entry-box {
-  width: min(90vw, 360px);
-  padding: 24px 20px;
+  padding: 18px 16px;
   border-radius: 10px;
   background: #0d0f10;
   border: 2px solid var(--accent);
-  box-shadow: 0 0 0 4px #000, 0 20px 60px rgba(0, 0, 0, 0.6);
+  box-shadow: 0 0 0 3px rgba(243, 178, 60, 0.18), 0 10px 30px rgba(0, 0, 0, 0.5);
   text-align: center;
   font-family: "Courier New", monospace;
 }
