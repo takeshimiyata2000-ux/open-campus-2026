@@ -10,6 +10,7 @@ const floatScoreLabel = document.getElementById("floatScoreLabel");
 const hintButton = document.getElementById("hintButton");
 const answerButton = document.getElementById("answerButton");
 const spotHintButton = document.getElementById("spotHintButton");
+const ligandSwitchButton = document.getElementById("ligandSwitchButton");
 const stageButtonsEl = document.getElementById("stageButtons");
 const stageBlurbEl = document.getElementById("stageBlurb");
 const proteinNameEl = document.getElementById("proteinName");
@@ -109,16 +110,17 @@ const STAGES = [
     id: "avidin-biotin",
     title: "5. ビオチン（卵の抗栄養因子）",
     protein: "../pdb_cache/1avd.cif",
-    proteinName: "アビジン（卵白由来タンパク質）",
+    proteinName: "アビジン（卵白由来タンパク質・二量体）",
     ligand: "ligands/biotin.sdf",
-    ligandName: "ビオチン（ビタミンB7）",
-    blurb: "卵白のアビジンはビオチンを驚異的な強さ（Kd〜10⁻¹⁵M）で抱え込む。生卵白を摂り続けるとビオチン欠乏症になるのはこのため。今回は「表面のくぼみ」ではなく、タンパク質の中に完全に閉じ込められた場所を探そう。",
-    mission: "ミッション: ビオチンをアビジンの内部空洞に完全に埋め込め！ 少しでもはみ出すと減点。",
-    timeLimit: 240,
+    ligandName: "ビオチン（ビタミンB7）× 2分子",
+    blurb: "卵白のアビジンはビオチンを驚異的な強さ（Kd〜10⁻¹⁵M）で抱え込む。生卵白を摂り続けるとビオチン欠乏症になるのはこのため。ここではアビジン二量体の2つの空洞、両方にビオチンを埋め込もう。",
+    mission: "ミッション: 2分子のビオチンを、それぞれの内部空洞に完全に埋め込め！ 両方が基準点以上でクリア。",
+    timeLimit: 300,
     clearThreshold: 55,
     answerKind: "hetsite",
     hetCode: "BTN",
     mode: "buried",
+    ligandCount: 2,
     answerNote: "実際にビオチンが結合しているβバレル内部の空洞です。生化学で最も強い非共有結合の一つとして知られています。",
   },
 ];
@@ -142,7 +144,7 @@ const state = {
   ligandHeavyCount: 12,
   pocketHints: [],
   answerSites: [],
-  answerMarker: null,
+  answerMarkers: [],
   spotHints: [],
   cleared: {},
   records: {},
@@ -160,8 +162,21 @@ const state = {
   timerRunning: false,
   timedOut: false,
   last: { x: 0, y: 0 },
-  pose: { tx: 0, ty: 0, tz: 0, R: [1, 0, 0, 0, 1, 0, 0, 0, 1] },
+  poses: [{ tx: 0, ty: 0, tz: 0, R: [1, 0, 0, 0, 1, 0, 0, 0, 1] }],
+  activeLigand: 0,
 };
+
+// state.pose は「今操作している分子」のposeを指すエイリアス。
+// 複数分子ステージ(ligandCount>1)では state.activeLigand を切り替えることで
+// 既存のドラッグ/回転/採点ロジックをそのまま使い回せるようにする。
+Object.defineProperty(state, "pose", {
+  get() {
+    return state.poses[state.activeLigand];
+  },
+  set(value) {
+    state.poses[state.activeLigand] = value;
+  },
+});
 
 init();
 
@@ -210,8 +225,11 @@ async function loadStage(index) {
     state.answerSites = stage.answerKind === "pocket"
       ? []
       : parseAnswerSites(cifText, stage.answerKind, stage.hetCode);
-    state.answerMarker = null;
+    state.answerMarkers = [];
     state.spotHints = [];
+    const ligandCount = stage.ligandCount || 1;
+    state.poses = Array.from({ length: ligandCount }, (_, i) => defaultPose(i));
+    state.activeLigand = 0;
     state.ligandTemplate = parseSdf(sdfText);
     state.ligandHeavyCount = Math.max(
       6,
@@ -264,6 +282,8 @@ async function loadStage(index) {
     // 「くぼみ候補を表示」はpocket型（正解未知・ゲームルールで高得点になる候補を提示）専用。
     // hetsite/ctb型は実在する正解サイトが別途あるので、無関係な候補で混乱させないよう隠す。
     hintButton.style.display = stage.answerKind === "pocket" ? "" : "none";
+    ligandSwitchButton.style.display = (stage.ligandCount || 1) > 1 ? "" : "none";
+    updateLigandSwitchLabel();
     setMode("view");
     resetPose();
     message.textContent = buriedStage
@@ -325,6 +345,15 @@ function bindEvents() {
 
   answerButton.addEventListener("click", showAnswer);
   spotHintButton.addEventListener("click", showSpotHint);
+
+  ligandSwitchButton.addEventListener("click", () => {
+    if (state.poses.length < 2) return;
+    state.activeLigand = (state.activeLigand + 1) % state.poses.length;
+    state.depthBase = state.pose.tz;
+    syncDepthSlider();
+    updateLigandSwitchLabel();
+    redrawSceneExtras();
+  });
 
   depthSlider.addEventListener("input", () => {
     maybeStartTimer();
@@ -408,22 +437,41 @@ function setMode(mode) {
   if (mode === "rotate") message.textContent = "ドラッグで低分子の向きを変えます。";
 }
 
-function defaultPose() {
-  const dir = normalize({ x: 1, y: 0.35, z: 0.2 });
+function defaultPose(index = 0) {
+  // 複数分子ステージでは、分子ごとに開始位置をずらして重ならないようにする
+  // (index=0は従来と完全に同じ挙動になる)
+  const angle = index * 1.4;
+  const baseDir = { x: 1, y: 0.35, z: 0.2 };
+  const dir = normalize({
+    x: baseDir.x * Math.cos(angle) - baseDir.y * Math.sin(angle),
+    y: baseDir.x * Math.sin(angle) + baseDir.y * Math.cos(angle),
+    z: baseDir.z,
+  });
   const reach = state.proteinRadius + 10;
   return {
     tx: state.proteinCenter.x + dir.x * reach,
     ty: state.proteinCenter.y + dir.y * reach,
     tz: state.proteinCenter.z + dir.z * reach,
-    R: eulerToMatrix(0.2, -0.6, 0.1),
+    R: eulerToMatrix(0.2, -0.6 + index * 0.3, 0.1),
   };
 }
 
+function updateLigandSwitchLabel() {
+  if (state.poses.length < 2) return;
+  ligandSwitchButton.textContent =
+    `操作中: 分子${state.activeLigand + 1} / ${state.poses.length}（クリックで切替）`;
+}
+
 function resetPose() {
-  state.answerMarker = null;
+  state.answerMarkers = [];
   state.spotHints = [];
-  state.pose = defaultPose();
-  snapLigandToSurface(13.0);
+  const savedActive = state.activeLigand;
+  for (let i = 0; i < state.poses.length; i += 1) {
+    state.activeLigand = i;
+    state.pose = defaultPose(i);
+    snapLigandToSurface(13.0);
+  }
+  state.activeLigand = savedActive;
   state.depthBase = state.pose.tz;
   depthSlider.value = "0";
   redrawSceneExtras();
@@ -520,39 +568,46 @@ function redrawSceneExtras() {
   state.viewer.removeAllShapes();
   if (typeof state.viewer.removeAllLabels === "function") state.viewer.removeAllLabels();
   if (state.showHints) drawPocketHints();
-  if (state.answerMarker) drawAnswerMarker();
+  if (state.answerMarkers.length) drawAnswerMarker();
   if (state.spotHints.length) drawSpotHint();
   drawLigand();
   state.viewer.render();
 }
 
 function drawLigand() {
-  const atoms = transformedLigandAtoms();
+  const multi = state.poses.length > 1;
+  state.poses.forEach((pose, index) => {
+    const atoms = transformedLigandAtomsFor(pose);
+    // 複数分子ステージでは、今操作している分子だけくっきり、他は少し薄く表示する
+    const alpha = !multi || index === state.activeLigand ? 1 : 0.5;
 
-  for (const bond of state.ligandTemplate.bonds) {
-    const a = atoms[bond.a - 1];
-    const b = atoms[bond.b - 1];
-    if (!a || !b) continue;
-    const radius = bond.order > 1 ? 0.11 : 0.09;
-    state.viewer.addCylinder({
-      start: { x: a.x, y: a.y, z: a.z },
-      end: { x: b.x, y: b.y, z: b.z },
-      radius,
-      color: "0xe6d7b0",
-      fromCap: true,
-      toCap: true,
-    });
-  }
+    for (const bond of state.ligandTemplate.bonds) {
+      const a = atoms[bond.a - 1];
+      const b = atoms[bond.b - 1];
+      if (!a || !b) continue;
+      const radius = bond.order > 1 ? 0.11 : 0.09;
+      state.viewer.addCylinder({
+        start: { x: a.x, y: a.y, z: a.z },
+        end: { x: b.x, y: b.y, z: b.z },
+        radius,
+        color: "0xe6d7b0",
+        alpha,
+        fromCap: true,
+        toCap: true,
+      });
+    }
 
-  for (const atom of atoms) {
-    const color = atomColors[atom.element] || "0xbec7d5";
-    const radius = atom.element === "H" ? 0.22 : atom.element === "O" ? 0.36 : 0.34;
-    state.viewer.addSphere({
-      center: { x: atom.x, y: atom.y, z: atom.z },
-      radius,
-      color,
-    });
-  }
+    for (const atom of atoms) {
+      const color = atomColors[atom.element] || "0xbec7d5";
+      const radius = atom.element === "H" ? 0.22 : atom.element === "O" ? 0.36 : 0.34;
+      state.viewer.addSphere({
+        center: { x: atom.x, y: atom.y, z: atom.z },
+        radius,
+        color,
+        alpha,
+      });
+    }
+  });
 }
 
 function drawPocketHints() {
@@ -659,9 +714,37 @@ function revealAnswer(stage) {
     message.textContent = "この構造では正解位置が見つかりませんでした。";
     return;
   }
+  const ligandCount = stage.ligandCount || 1;
+
+  if (ligandCount > 1) {
+    // 分子の数だけ、実在する正解サイトへ1つずつ配置する（サイトが足りなければ使い回す）
+    const savedActive = state.activeLigand;
+    const markers = [];
+    for (let i = 0; i < ligandCount; i += 1) {
+      const site = state.answerSites[i % state.answerSites.length];
+      state.activeLigand = i;
+      seatLigandAt(site);
+      markers.push(site);
+    }
+    state.activeLigand = savedActive;
+    state.answerMarkers = markers;
+    redrawSceneExtras();
+
+    const perLigand = scoreAllLigands(stage);
+    const worst = perLigand.reduce((min, r) => (r.total < min.total ? r : min));
+    const summary = perLigand.map((r, i) => `分子${i + 1}: ${r.total}点`).join(" / ");
+    floatScoreNum.textContent = String(worst.total);
+    floatScoreLabel.textContent = "お手本の位置";
+    scoreNumber.textContent = String(worst.total);
+    scoreLabel.textContent = `お手本（${summary}）`;
+    message.textContent = (stage.answerNote || "実際の結合部位の一例です。") +
+      ` それぞれの分子を実在の結合部位に配置しました（${summary}）。`;
+    return;
+  }
+
   const site = state.answerSites[Math.floor(Math.random() * state.answerSites.length)];
   seatLigandAt(site);
-  state.answerMarker = site;
+  state.answerMarkers = [site];
   redrawSceneExtras();
 
   const score = scoreLigand();
@@ -749,13 +832,15 @@ function seatLigandAt(site) {
 
 function drawAnswerMarker() {
   // ワイヤーフレームのみ（塗りつぶし球はsurface内部で黒く見えるため使わない）
-  state.viewer.addSphere({
-    center: state.answerMarker,
-    radius: 4.6,
-    color: "0x5fd0ff",
-    alpha: 0.6,
-    wireframe: true,
-  });
+  for (const marker of state.answerMarkers) {
+    state.viewer.addSphere({
+      center: marker,
+      radius: 4.6,
+      color: "0x5fd0ff",
+      alpha: 0.6,
+      wireframe: true,
+    });
+  }
 }
 
 function drawSpotHint() {
@@ -855,16 +940,20 @@ function parseSdf(text) {
   };
 }
 
-function transformedLigandAtoms() {
+function transformedLigandAtomsFor(pose) {
   return state.ligandTemplate.atoms.map((atom) => {
-    const p = matVec(state.pose.R, atom);
+    const p = matVec(pose.R, atom);
     return {
       ...atom,
-      x: p.x + state.pose.tx,
-      y: p.y + state.pose.ty,
-      z: p.z + state.pose.tz,
+      x: p.x + pose.tx,
+      y: p.y + pose.ty,
+      z: p.z + pose.tz,
     };
   });
+}
+
+function transformedLigandAtoms() {
+  return transformedLigandAtomsFor(state.pose);
 }
 
 function rotatePoint(point, rx, ry, rz) {
@@ -999,9 +1088,21 @@ function hasSolventAccess(ligandAtoms) {
 
 function scoreLigand() {
   const stage = STAGES[state.stageIndex];
+  const ligandAtoms = transformedLigandAtoms().filter((atom) => atom.element !== "H");
+  return scoreLigandAtoms(stage, ligandAtoms);
+}
+
+// 複数分子ステージで、各分子（pose）を個別に採点するために使う
+function scoreAllLigands(stage) {
+  return state.poses.map((pose) => {
+    const ligandAtoms = transformedLigandAtomsFor(pose).filter((atom) => atom.element !== "H");
+    return scoreLigandAtoms(stage, ligandAtoms);
+  });
+}
+
+function scoreLigandAtoms(stage, ligandAtoms) {
   const buried = stage.mode === "buried";
   const heavy = state.ligandHeavyCount;
-  const ligandAtoms = transformedLigandAtoms().filter((atom) => atom.element !== "H");
   let collisions = 0;
   let contacts = 0;
   let shellAtoms = 0;
@@ -1087,6 +1188,24 @@ function countLigandCollisions() {
 
 function doJudge() {
   ensureAudio();
+  const stage = STAGES[state.stageIndex];
+  const ligandCount = stage.ligandCount || 1;
+
+  if (ligandCount > 1) {
+    const perLigand = scoreAllLigands(stage);
+    const worst = perLigand.reduce((min, r) => (r.total < min.total ? r : min));
+    const threshold = stage.clearThreshold || CLEAR_THRESHOLD;
+    const summary = perLigand.map((r, i) => `分子${i + 1}: ${r.total}点`).join(" / ");
+    const combined = {
+      ...worst,
+      reason: worst.total >= threshold
+        ? `両方クリア！（${summary}）`
+        : `${summary}（両方${threshold}点以上でクリア）`,
+    };
+    renderScore(combined);
+    return;
+  }
+
   const score = scoreLigand();
   renderScore(score);
 }
