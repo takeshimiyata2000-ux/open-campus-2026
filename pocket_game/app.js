@@ -227,10 +227,15 @@ async function loadStage(index) {
     const buriedStage = stage.mode === "buried";
     if (buriedStage) {
       // 埋没型は「白い不透明サーフェス」があると内部の空洞が完全に見えなくなり手探りになる。
-      // 半透明サーフェス＋cartoonの重ね描画は3Dmol側で面が重なって黒くつぶれることがあるため、
-      // 埋没型はサーフェスを出さずcartoon（骨格）だけで内部が見通せるようにする。
+      // 半透明の塗りつぶしサーフェスは3Dmol側で面が重なって黒くつぶれることがあったため、
+      // 塗りつぶしではなくワイヤーフレーム（線）でサーフェスの輪郭だけを見せる。
       // 採点は引き続き実際の原子間距離で行うので、見やすくなるだけで判定が甘くなるわけではない。
-      proteinModel.setStyle({}, { cartoon: { color: "white", opacity: 0.9 } });
+      proteinModel.setStyle({}, { cartoon: { color: "white", opacity: 0.5 } });
+      state.viewer.addSurface(
+        state.mol3d.SurfaceType.VDW,
+        { color: "white", opacity: 0.5, wireframe: true },
+        { model: proteinModel }
+      );
     } else {
       proteinModel.setStyle({}, { cartoon: { color: "white", opacity: 0.18 } });
       state.viewer.addSurface(
@@ -251,6 +256,9 @@ async function loadStage(index) {
 
     state.showHints = false;
     hintButton.textContent = "くぼみ候補を表示";
+    // 「くぼみ候補を表示」はpocket型（正解未知・ゲームルールで高得点になる候補を提示）専用。
+    // hetsite/ctb型は実在する正解サイトが別途あるので、無関係な候補で混乱させないよう隠す。
+    hintButton.style.display = stage.answerKind === "pocket" ? "" : "none";
     setMode("view");
     resetPose();
     message.textContent = buriedStage
