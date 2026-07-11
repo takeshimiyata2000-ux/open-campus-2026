@@ -227,15 +227,17 @@ async function loadStage(index) {
     const buriedStage = stage.mode === "buried";
     if (buriedStage) {
       // 埋没型は「白い不透明サーフェス」があると内部の空洞が完全に見えなくなり手探りになる。
-      // 半透明の塗りつぶしサーフェスは3Dmol側で面が重なって黒くつぶれることがあったため、
-      // 塗りつぶしではなくワイヤーフレーム（線）でサーフェスの輪郭だけを見せる。
+      // かといってタンパク質全体をワイヤーフレーム化すると情報量が多すぎて見づらいので、
+      // 実在の結合部位（hetCode）周辺だけに範囲を絞った局所的なサーフェスのみ表示する。
       // 採点は引き続き実際の原子間距離で行うので、見やすくなるだけで判定が甘くなるわけではない。
       proteinModel.setStyle({}, { cartoon: { color: "white", opacity: 0.5 } });
-      state.viewer.addSurface(
-        state.mol3d.SurfaceType.VDW,
-        { color: "white", opacity: 0.5, wireframe: true },
-        { model: proteinModel }
-      );
+      if (stage.hetCode) {
+        state.viewer.addSurface(
+          state.mol3d.SurfaceType.VDW,
+          { color: "white", opacity: 0.55, wireframe: true },
+          { within: { distance: 9, sel: { resn: stage.hetCode } } }
+        );
+      }
     } else {
       proteinModel.setStyle({}, { cartoon: { color: "white", opacity: 0.18 } });
       state.viewer.addSurface(
