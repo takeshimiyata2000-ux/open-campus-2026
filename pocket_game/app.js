@@ -105,6 +105,22 @@ const STAGES = [
     hetCode: "RTL",
     answerNote: "実際にレチノールが結合している袋状ポケット（カリックス）です。深いポケットなのできれいに収まります。",
   },
+  {
+    id: "avidin-biotin",
+    title: "5. ビオチン（卵の抗栄養因子）",
+    protein: "../pdb_cache/1avd.cif",
+    proteinName: "アビジン（卵白由来タンパク質）",
+    ligand: "ligands/biotin.sdf",
+    ligandName: "ビオチン（ビタミンB7）",
+    blurb: "卵白のアビジンはビオチンを驚異的な強さ（Kd〜10⁻¹⁵M）で抱え込む。生卵白を摂り続けるとビオチン欠乏症になるのはこのため。今回は「表面のくぼみ」ではなく、タンパク質の中に完全に閉じ込められた場所を探そう。",
+    mission: "ミッション: ビオチンをアビジンの内部空洞に完全に埋め込め！ 少しでもはみ出すと減点。",
+    timeLimit: 240,
+    clearThreshold: 55,
+    answerKind: "hetsite",
+    hetCode: "BTN",
+    mode: "buried",
+    answerNote: "実際にビオチンが結合しているβバレル内部の空洞です。生化学で最も強い非共有結合の一つとして知られています。",
+  },
 ];
 
 const atomColors = {
@@ -952,6 +968,8 @@ function hasSolventAccess(ligandAtoms) {
 }
 
 function scoreLigand() {
+  const stage = STAGES[state.stageIndex];
+  const buried = stage.mode === "buried";
   const heavy = state.ligandHeavyCount;
   const ligandAtoms = transformedLigandAtoms().filter((atom) => atom.element !== "H");
   let collisions = 0;
@@ -980,8 +998,12 @@ function scoreLigand() {
   if (severeCollisions > 3 || collisions > collisionCap) {
     return zeroScore("内部に埋もれすぎ", { minDistance, collisions, severeCollisions, contacts, shellAtoms });
   }
-  if (!hasSolventAccess(ligandAtoms)) {
-    return zeroScore("内部に埋もれすぎ", { minDistance, collisions, severeCollisions, contacts, shellAtoms });
+  const solventOk = hasSolventAccess(ligandAtoms);
+  if (buried ? solventOk : !solventOk) {
+    return zeroScore(
+      buried ? "表面にはみ出しています（完全に埋め込んで）" : "内部に埋もれすぎ",
+      { minDistance, collisions, severeCollisions, contacts, shellAtoms }
+    );
   }
 
   const enclosureScore = Math.round(clamp(shellAtoms / (heavy * 0.85), 0, 45));
@@ -1003,7 +1025,7 @@ function scoreLigand() {
     severeCollisions,
     contacts,
     minDistance,
-    reason: labelForScore(total, collisions, severeCollisions, STAGES[state.stageIndex].clearThreshold || CLEAR_THRESHOLD),
+    reason: labelForScore(total, collisions, severeCollisions, stage.clearThreshold || CLEAR_THRESHOLD),
   };
 }
 
