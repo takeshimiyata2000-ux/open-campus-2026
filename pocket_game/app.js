@@ -143,7 +143,7 @@ const state = {
   pocketHints: [],
   answerSites: [],
   answerMarker: null,
-  spotHint: null,
+  spotHints: [],
   cleared: {},
   records: {},
   leaderboard: {},
@@ -211,7 +211,7 @@ async function loadStage(index) {
       ? []
       : parseAnswerSites(cifText, stage.answerKind, stage.hetCode);
     state.answerMarker = null;
-    state.spotHint = null;
+    state.spotHints = [];
     state.ligandTemplate = parseSdf(sdfText);
     state.ligandHeavyCount = Math.max(
       6,
@@ -224,10 +224,14 @@ async function loadStage(index) {
 
     state.viewer.clear();
     const proteinModel = state.viewer.addModel(cifText, "cif");
-    proteinModel.setStyle({}, { cartoon: { color: "white", opacity: 0.18 } });
+    const buriedStage = stage.mode === "buried";
+    // 埋没型は表面を不透明にすると内部の空洞が完全に見えなくなり手探りになってしまうため、
+    // 表面をごく薄くしてcartoon（骨格）を濃くし、中が透けて見えるようにする。
+    // 採点は引き続き実際の原子間距離で行うので、見やすくなるだけで判定が甘くなるわけではない。
+    proteinModel.setStyle({}, { cartoon: { color: "white", opacity: buriedStage ? 0.55 : 0.18 } });
     state.viewer.addSurface(
       state.mol3d.SurfaceType.VDW,
-      { color: "white", opacity: 0.82 },
+      { color: "white", opacity: buriedStage ? 0.12 : 0.82 },
       { model: proteinModel }
     );
     state.viewer.zoomTo();
@@ -244,7 +248,9 @@ async function loadStage(index) {
     hintButton.textContent = "くぼみ候補を表示";
     setMode("view");
     resetPose();
-    message.textContent = "まずタンパク質を回して、よさそうなくぼみを探してください。";
+    message.textContent = buriedStage
+      ? "タンパク質を回して、内部に透けて見える空洞を探してください。中に完全に収めるのがゴールです。"
+      : "まずタンパク質を回して、よさそうなくぼみを探してください。";
   } catch (error) {
     message.textContent = "構造ファイルを読み込めません。ローカルサーバーから開いてください。";
     console.error(error);
@@ -397,7 +403,7 @@ function defaultPose() {
 
 function resetPose() {
   state.answerMarker = null;
-  state.spotHint = null;
+  state.spotHints = [];
   state.pose = defaultPose();
   snapLigandToSurface(13.0);
   state.depthBase = state.pose.tz;
@@ -497,7 +503,7 @@ function redrawSceneExtras() {
   if (typeof state.viewer.removeAllLabels === "function") state.viewer.removeAllLabels();
   if (state.showHints) drawPocketHints();
   if (state.answerMarker) drawAnswerMarker();
-  if (state.spotHint) drawSpotHint();
+  if (state.spotHints.length) drawSpotHint();
   drawLigand();
   state.viewer.render();
 }
@@ -736,13 +742,16 @@ function drawAnswerMarker() {
 
 function drawSpotHint() {
   // 「ここだよ！」の赤い場所ヒント（ワイヤーフレームで黒球化を回避）
-  state.viewer.addSphere({
-    center: state.spotHint,
-    radius: 5.0,
-    color: "0xff4d4d",
-    alpha: 0.65,
-    wireframe: true,
-  });
+  // 正解サイトが複数ある場合（例: 対称な結合部位が2箇所以上）は、そのすべてに印を付ける
+  for (const spot of state.spotHints) {
+    state.viewer.addSphere({
+      center: spot,
+      radius: 5.0,
+      color: "0xff4d4d",
+      alpha: 0.65,
+      wireframe: true,
+    });
+  }
 }
 
 function showSpotHint() {
@@ -758,12 +767,15 @@ function showSpotHint() {
       spotHintButton.disabled = false;
       return;
     }
-    const site = stage.answerKind === "pocket"
-      ? state.answerSites[0]
-      : state.answerSites[Math.floor(Math.random() * state.answerSites.length)];
-    state.spotHint = site;
+    // pocket型は緑の候補表示と役割が重複するため代表1点のみ。
+    // hetsite/ctb型は実在する正解サイトなので、複数あればすべて表示する（対称な結合部位を見落とさないように）。
+    state.spotHints = stage.answerKind === "pocket"
+      ? [state.answerSites[0]]
+      : state.answerSites.slice();
     redrawSceneExtras();
-    message.textContent = "赤い印のあたりに低分子を動かしてみよう！ 場所が合えば得点が上がります。";
+    message.textContent = state.spotHints.length > 1
+      ? `赤い印が${state.spotHints.length}箇所あります。どれか1つに低分子を動かしてみよう！ 場所が合えば得点が上がります。`
+      : "赤い印のあたりに低分子を動かしてみよう！ 場所が合えば得点が上がります。";
     spotHintButton.disabled = false;
   }, 20);
 }
