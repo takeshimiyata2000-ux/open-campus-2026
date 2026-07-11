@@ -225,15 +225,20 @@ async function loadStage(index) {
     state.viewer.clear();
     const proteinModel = state.viewer.addModel(cifText, "cif");
     const buriedStage = stage.mode === "buried";
-    // 埋没型は表面を不透明にすると内部の空洞が完全に見えなくなり手探りになってしまうため、
-    // 表面をごく薄くしてcartoon（骨格）を濃くし、中が透けて見えるようにする。
-    // 採点は引き続き実際の原子間距離で行うので、見やすくなるだけで判定が甘くなるわけではない。
-    proteinModel.setStyle({}, { cartoon: { color: "white", opacity: buriedStage ? 0.55 : 0.18 } });
-    state.viewer.addSurface(
-      state.mol3d.SurfaceType.VDW,
-      { color: "white", opacity: buriedStage ? 0.12 : 0.82 },
-      { model: proteinModel }
-    );
+    if (buriedStage) {
+      // 埋没型は「白い不透明サーフェス」があると内部の空洞が完全に見えなくなり手探りになる。
+      // 半透明サーフェス＋cartoonの重ね描画は3Dmol側で面が重なって黒くつぶれることがあるため、
+      // 埋没型はサーフェスを出さずcartoon（骨格）だけで内部が見通せるようにする。
+      // 採点は引き続き実際の原子間距離で行うので、見やすくなるだけで判定が甘くなるわけではない。
+      proteinModel.setStyle({}, { cartoon: { color: "white", opacity: 0.9 } });
+    } else {
+      proteinModel.setStyle({}, { cartoon: { color: "white", opacity: 0.18 } });
+      state.viewer.addSurface(
+        state.mol3d.SurfaceType.VDW,
+        { color: "white", opacity: 0.82 },
+        { model: proteinModel }
+      );
+    }
     state.viewer.zoomTo();
     state.viewer.render();
 
