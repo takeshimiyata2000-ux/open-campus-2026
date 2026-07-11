@@ -230,12 +230,15 @@ async function loadStage(index) {
       // かといってタンパク質全体をワイヤーフレーム化すると情報量が多すぎて見づらいので、
       // 実在の結合部位（hetCode）周辺だけに範囲を絞った局所的なサーフェスのみ表示する。
       // 採点は引き続き実際の原子間距離で行うので、見やすくなるだけで判定が甘くなるわけではない。
-      proteinModel.setStyle({}, { cartoon: { color: "white", opacity: 0.5 } });
+      // opacityを高くしても、cartoonはリボン状で隙間が多いため内部が完全には隠れない。
+      // 暗く見えづらかったので不透明に近づけて明るくする。
+      proteinModel.setStyle({}, { cartoon: { color: "white", opacity: 0.92 } });
       if (stage.hetCode) {
+        // 半径を絞って、結合部位のすぐ周りだけの小さな目安表示にする（毛玉状の密集を避ける）
         state.viewer.addSurface(
           state.mol3d.SurfaceType.VDW,
-          { color: "white", opacity: 0.55, wireframe: true },
-          { within: { distance: 9, sel: { resn: stage.hetCode } } }
+          { color: "white", opacity: 0.4, wireframe: true },
+          { within: { distance: 5.5, sel: { resn: stage.hetCode } } }
         );
       }
     } else {
