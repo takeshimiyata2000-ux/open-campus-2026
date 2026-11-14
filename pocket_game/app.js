@@ -268,6 +268,7 @@ async function loadStage(index) {
       );
     }
     state.viewer.zoomTo();
+    state.viewer.zoom(0.82); // 低分子が画面の端で切れないよう、少し引いて表示する
     state.viewer.render();
 
     stageBlurbEl.textContent = stage.blurb;
@@ -589,12 +590,12 @@ function drawLigand() {
       const a = atoms[bond.a - 1];
       const b = atoms[bond.b - 1];
       if (!a || !b) continue;
-      const radius = bond.order > 1 ? 0.11 : 0.09;
+      const radius = bond.order > 1 ? 0.26 : 0.2;
       state.viewer.addCylinder({
         start: { x: a.x, y: a.y, z: a.z },
         end: { x: b.x, y: b.y, z: b.z },
         radius,
-        color: "0xe6d7b0",
+        color: "0xffe08a",
         alpha,
         fromCap: true,
         toCap: true,
@@ -603,12 +604,31 @@ function drawLigand() {
 
     for (const atom of atoms) {
       const color = atomColors[atom.element] || "0xbec7d5";
-      const radius = atom.element === "H" ? 0.22 : atom.element === "O" ? 0.36 : 0.34;
+      const radius = atom.element === "H" ? 0.3 : atom.element === "O" ? 0.6 : 0.56;
       state.viewer.addSphere({
         center: { x: atom.x, y: atom.y, z: atom.z },
         radius,
         color,
         alpha,
+      });
+    }
+
+    // 表面の裏に入っても見失わないよう、常に最前面に出るラベルを低分子の上に付ける
+    if (!multi || index === state.activeLigand) {
+      const c = centroid(atoms);
+      const stage = STAGES[state.stageIndex];
+      const base = String(stage.ligandName || "低分子").split("（")[0];
+      state.viewer.addLabel(multi ? `${base} ${index + 1}` : base, {
+        position: { x: c.x, y: c.y, z: c.z },
+        fontSize: 15,
+        fontColor: "#1a1a1a",
+        backgroundColor: "#ffd24a",
+        backgroundOpacity: 0.95,
+        borderColor: "#ffffff",
+        borderThickness: 1,
+        inFront: true,
+        showBackground: true,
+        alignment: "bottomCenter",
       });
     }
   });
