@@ -6,11 +6,15 @@ docking_lab/data/<stage>.js を出力する。
 
 使い方:
   python3 tools/prepare_stage.py <cif> <リガンド名> <リガンドのauth鎖> <stage id> [--chains A,B]
+  リガンド名は "FE+CO3" のように + でつなぐと、複数の残基を 1 つの分子として扱う。
 """
 import sys, json, math, argparse
 import numpy as np
 
-DONOR = 1; ACCEPTOR = 2; HYDROPHOBIC = 4; POSITIVE = 8; NEGATIVE = 16
+DONOR = 1; ACCEPTOR = 2; HYDROPHOBIC = 4; POSITIVE = 8; NEGATIVE = 16; METAL = 32; COORD = 64
+
+METALS = {"FE", "ZN", "CU", "MN", "MG", "CA", "CO", "NI"}
+PROT_COORD = {("TYR","OH"),("ASP","OD1"),("ASP","OD2"),("GLU","OE1"),("GLU","OE2"),("HIS","NE2"),("HIS","ND1")}
 
 PROT_DONOR = {("ARG","NE"),("ARG","NH1"),("ARG","NH2"),("ASN","ND2"),("GLN","NE2"),
               ("HIS","ND1"),("HIS","NE2"),("LYS","NZ"),("SER","OG"),("THR","OG1"),
@@ -43,6 +47,7 @@ def typed_protein(atoms):
         if key in PROT_ACCEPTOR: f |= ACCEPTOR
         if key in PROT_POS: f |= POSITIVE
         if key in PROT_NEG: f |= NEGATIVE
+        if key in PROT_COORD: f |= COORD
         if a["el"] == "C":
             d = np.linalg.norm(xyz - xyz[i], axis=1)
             if not np.any(hetero & (d < 1.75)): f |= HYDROPHOBIC
@@ -51,7 +56,7 @@ def typed_protein(atoms):
     return atoms
 
 def ligand_bonds(lig):
-    cov = {"C":0.77,"N":0.75,"O":0.73,"S":1.02,"P":1.06,"F":0.71,"CL":0.99,"BR":1.14,"I":1.33}
+    cov = {"FE":1.25,"ZN":1.2,"CU":1.2,"MN":1.3,"C":0.77,"N":0.75,"O":0.73,"S":1.02,"P":1.06,"F":0.71,"CL":0.99,"BR":1.14,"I":1.33}
     bonds = []
     for i in range(len(lig)):
         for j in range(i+1, len(lig)):
@@ -67,11 +72,14 @@ def typed_ligand(lig, bonds, overrides):
         f = 0; el = a["el"]
         if el == "O":
             f |= ACCEPTOR
-            if len(nb[i]) == 1:
+            if any(lig[k]["el"] in METALS for k in nb[i]):
+                f |= NEGATIVE                                                                # 金属に結合した酸素（炭酸イオンなど）
+            elif len(nb[i]) == 1:
                 c = nb[i][0]
-                o_sibs = [k for k in nb[c] if lig[k]["el"] == "O" and len(nb[k]) == 1]
+                o_sibs = [k for k in nb[c] if lig[k]["el"] == "O"]
                 d = math.dist(a["xyz"], lig[c]["xyz"])
-                if lig[c]["el"] in ("C","P","S") and len(o_sibs) >= 2: f |= NEGATIVE      # カルボン酸・リン酸
+                if lig[c]["el"] in ("C","P","S") and len(o_sibs) >= 2 and all(len(nb[k]) == 1 or any(lig[m]["el"] in METALS for m in nb[k]) for k in o_sibs):
+                    f |= NEGATIVE                                                            # カルボン酸・リン酸・炭酸
                 elif lig[c]["el"] == "C" and d > 1.33: f |= DONOR                            # ヒドロキシ基
         elif el == "N":
             if len(nb[i]) <= 2: f |= DONOR
@@ -80,6 +88,8 @@ def typed_ligand(lig, bonds, overrides):
             if not any(lig[k]["el"] in ("N","O") for k in nb[i]): f |= HYDROPHOBIC
         elif el in ("S","CL","BR","I","F"):
             f |= HYDROPHOBIC
+        elif el in METALS:
+            f |= METAL
         if a["name"] in overrides: f = overrides[a["name"]]
         a["flags"] = f
     return nb
@@ -142,7 +152,7 @@ def main():
             if keep and r["auth_asym_id"] not in keep: continue
             prot.append({"name": r["label_atom_id"].strip('"'), "res": r["label_comp_id"], "chain": r["auth_asym_id"],
                          "resi": int(r["auth_seq_id"]), "el": el, "x": x, "y": y, "z": z})
-        elif r["label_comp_id"] == args.ligand and r["auth_asym_id"] == args.ligchain:
+        elif r["label_comp_id"] in args.ligand.split("+") and r["auth_asym_id"] == args.ligchain:
             lig.append({"name": r["label_atom_id"].strip('"'), "el": el, "xyz": [x, y, z]})
     assert prot and lig, "protein or ligand not found"
     typed_protein(prot)

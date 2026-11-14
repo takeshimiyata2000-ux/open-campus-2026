@@ -6,10 +6,11 @@
 })(typeof self !== "undefined" ? self : this, function () {
   "use strict";
 
-  const FLAG = { DONOR: 1, ACCEPTOR: 2, HYDROPHOBIC: 4, POSITIVE: 8, NEGATIVE: 16 };
+  // METAL: リガンド側の金属イオン。COORD: 金属に配位できるタンパク質側の原子（Tyr・Asp・Glu の O、His の N）
+  const FLAG = { DONOR: 1, ACCEPTOR: 2, HYDROPHOBIC: 4, POSITIVE: 8, NEGATIVE: 16, METAL: 32, COORD: 64 };
 
   // 各項目の重み。結晶構造のポーズ = 100 点になるよう、後で正規化する。
-  const WEIGHTS = { hbond: 1.0, hydrophobic: 0.06, fit: 0.22, electrostatic: 0.5, clash: 1.5, intraClash: 1.5 };
+  const WEIGHTS = { hbond: 1.0, hydrophobic: 0.06, fit: 0.22, electrostatic: 0.5, metal: 1.6, clash: 1.5, intraClash: 1.5 };
 
   const CELL = 8.0; // 空間グリッドの 1 辺（Å）。埋もれ具合を数える距離（8 Å）以上にする
 
@@ -71,7 +72,8 @@
   // ligandAtoms: [{x,y,z,el,flags}]（ワールド座標）
   // 戻り値: 各項目の素点と、表示用の相互作用リスト
   function scorePose(grid, ligandAtoms, template) {
-    let hb = 0, hyd = 0, elec = 0, clash = 0, fit = 0;
+    let hb = 0, hyd = 0, elec = 0, clash = 0, fit = 0, metal = 0;
+    const metalBonds = [];
     const hbonds = [];
     const clashes = [];
     const hydResidues = new Map();
@@ -108,8 +110,24 @@
             ((l.flags & FLAG.DONOR) && (p.flags & FLAG.ACCEPTOR)) ||
             ((l.flags & FLAG.ACCEPTOR) && (p.flags & FLAG.DONOR));
 
-          // 衝突（近すぎ）。水素結合できる組は 2.5 Å まで近づける
-          const minDist = hbPair ? 2.4 : (isPolar(l) && isPolar(p)) ? 2.8 : (isPolar(l) || isPolar(p)) ? 3.0 : 3.2;
+          const metalPair = (l.flags & FLAG.METAL) && (p.flags & FLAG.COORD);
+
+          // 金属への配位結合（約 2 Å）。1 つの金属イオンにつき 4 本まで数える
+          if (metalPair && d >= 1.7) {
+            const s = ramp(d, 2.45, 2.95);
+            if (s > 0) {
+              const room = Math.max(0, 4 - perAtomHb[li]);
+              const used = Math.min(s, room);
+              if (used > 0) {
+                perAtomHb[li] += used;
+                metal += used * polarScale;
+                metalBonds.push({ li, p, d, strength: s * polarScale });
+              }
+            }
+          }
+
+          // 衝突（近すぎ）。水素結合できる組は 2.4 Å まで近づける
+          const minDist = metalPair ? 1.75 : (l.flags & FLAG.METAL) ? 2.7 : hbPair ? 2.4 : (isPolar(l) && isPolar(p)) ? 2.8 : (isPolar(l) || isPolar(p)) ? 3.0 : 3.2;
           if (d < minDist) {
             const overlap = minDist - d;
             clash += overlap;
@@ -164,10 +182,11 @@
       hydrophobic: WEIGHTS.hydrophobic * hyd,
       fit: WEIGHTS.fit * fit,
       electrostatic: WEIGHTS.electrostatic * elec,
+      metal: WEIGHTS.metal * metal,
       clash: -WEIGHTS.clash * clash - WEIGHTS.intraClash * intra,
     };
-    const raw = parts.hbond + parts.hydrophobic + parts.fit + parts.electrostatic + parts.clash;
-    return { raw, parts, hbonds, clashes, hydResidues, intraClash: intra, counts: { hbond: hb, hydrophobic: hyd, clash, fit } };
+    const raw = parts.hbond + parts.hydrophobic + parts.fit + parts.electrostatic + parts.metal + parts.clash;
+    return { raw, parts, hbonds, metalBonds, clashes, hydResidues, intraClash: intra, counts: { hbond: hb, hydrophobic: hyd, clash, fit } };
   }
 
   // ---- 幾何 ----
@@ -240,7 +259,7 @@
       bonds: ligand.bonds,
       torsions: ligand.torsions,
       crystal: ligand.atoms.map((a) => ({ ...a })),
-      symmetry: symmetricSwaps(ligand),
+      symmetry: symmetricGroups(ligand),
       nonbonded: nonbondedPairs(ligand),
     };
   }
@@ -268,30 +287,42 @@
     });
   }
 
-  // カルボン酸の 2 つの酸素のように、入れ替えても同じ分子になる原子の組
-  function symmetricSwaps(ligand) {
+  // カルボン酸や炭酸イオンの酸素のように、入れ替えても同じ分子になる原子の組。
+  // 金属に結合している酸素も、入れ替え可能として扱う。
+  function symmetricGroups(ligand) {
     const nb = ligand.atoms.map(() => []);
     for (const [i, j] of ligand.bonds) { nb[i].push(j); nb[j].push(i); }
-    const swaps = [];
+    const isMetal = (k) => (ligand.atoms[k].flags & FLAG.METAL) !== 0;
+    const groups = [];
     ligand.atoms.forEach((atom, c) => {
-      const terminalO = nb[c].filter((k) => ligand.atoms[k].el === "O" && nb[k].length === 1);
-      if (terminalO.length === 2) swaps.push(terminalO);
+      if (isMetal(c)) return;
+      const oxygens = nb[c].filter((k) => ligand.atoms[k].el === "O" && nb[k].every((m) => m === c || isMetal(m)));
+      if (oxygens.length >= 2 && oxygens.length <= 4) groups.push(oxygens);
     });
-    return swaps;
+    return groups;
+  }
+
+  function permutations(items) {
+    if (items.length <= 1) return [items];
+    const out = [];
+    items.forEach((item, i) => {
+      for (const rest of permutations(items.filter((_, k) => k !== i))) out.push([item, ...rest]);
+    });
+    return out;
   }
 
   function rmsdToCrystal(template, placed) {
     const ref = template.crystal;
-    const sq = placed.map((p, i) => {
-      const r = ref[i];
-      return (p.x - r.x) ** 2 + (p.y - r.y) ** 2 + (p.z - r.z) ** 2;
-    });
-    let total = sq.reduce((s, v) => s + v, 0);
-    for (const [a, b] of template.symmetry) {
-      const d = (p, r) => (p.x - r.x) ** 2 + (p.y - r.y) ** 2 + (p.z - r.z) ** 2;
-      const swapped = d(placed[a], ref[b]) + d(placed[b], ref[a]);
-      const straight = sq[a] + sq[b];
-      if (swapped < straight) total += swapped - straight;
+    const d2 = (p, r) => (p.x - r.x) ** 2 + (p.y - r.y) ** 2 + (p.z - r.z) ** 2;
+    let total = placed.reduce((sum, p, i) => sum + d2(p, ref[i]), 0);
+    for (const group of template.symmetry) {
+      const straight = group.reduce((sum, k) => sum + d2(placed[k], ref[k]), 0);
+      let best = straight;
+      for (const perm of permutations(group)) {
+        const v = group.reduce((sum, k, n) => sum + d2(placed[k], ref[perm[n]]), 0);
+        if (v < best) best = v;
+      }
+      total += best - straight;
     }
     return Math.sqrt(total / placed.length);
   }

@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
     <title>ドッキングラボ（試作版）</title>
-    <link rel="stylesheet" href="styles.css?v=3">
+    <link rel="stylesheet" href="styles.css?v=4">
   </head>
   <body>
     <main class="app">
@@ -37,6 +37,9 @@
             <div class="hud-hbond">
               <span class="dot"></span>水素結合 <strong id="liveHbond">0</strong> 本
             </div>
+            <div class="hud-hbond hud-metal metal-only" hidden>
+              <span class="dot"></span>配位結合 <strong id="liveMetal">0</strong> 本
+            </div>
             <div id="clashWarning" class="hud-clash" hidden>ぶつかっています</div>
           </div>
 
@@ -47,6 +50,11 @@
 
       <aside class="control-panel">
         <section>
+          <h2>ステージ</h2>
+          <div id="stageList" class="stages"></div>
+        </section>
+
+        <section class="about">
           <p id="stageBlurb" class="blurb"></p>
           <dl class="facts">
             <div><dt>タンパク質</dt><dd id="proteinName"></dd></div>
@@ -78,6 +86,7 @@
           <h2>スコアの内訳</h2>
           <ul class="breakdown">
             <li data-term="hbond"><span class="term">水素結合</span><span class="bar"><i></i></span><b>0</b></li>
+            <li data-term="metal" class="metal-only" hidden><span class="term">金属への配位</span><span class="bar"><i></i></span><b>0</b></li>
             <li data-term="fit"><span class="term">ポケットへの収まり</span><span class="bar"><i></i></span><b>0</b></li>
             <li data-term="hydrophobic"><span class="term">疎水性の接触</span><span class="bar"><i></i></span><b>0</b></li>
             <li data-term="electrostatic"><span class="term">静電相互作用</span><span class="bar"><i></i></span><b>0</b></li>
@@ -108,6 +117,7 @@
           <h2>色の見方</h2>
           <ul class="legend">
             <li><span class="swatch hb"></span>緑の点線: 水素結合</li>
+            <li class="metal-only" hidden><span class="swatch metal"></span>オレンジの点線: 金属への配位結合</li>
             <li><span class="swatch clash"></span>赤い球: ぶつかっている原子</li>
             <li><span class="swatch answer"></span>緑の分子: 結晶構造での正解</li>
           </ul>
@@ -116,8 +126,10 @@
     </main>
 
     <script src="3Dmol-min.js"></script>
-    <script src="scoring.js?v=1"></script>
-    <script src="data/avidin-biotin.js?v=1"></script>
-    <script src="app.js?v=3"></script>
+    <script src="scoring.js?v=2"></script>
+    <script src="data/avidin-biotin.js?v=2"></script>
+    <script src="data/lactoferrin-iron.js?v=1"></script>
+    <script src="data/estrogen-raloxifene.js?v=1"></script>
+    <script src="app.js?v=4"></script>
   </body>
 </html>

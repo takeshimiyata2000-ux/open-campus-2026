@@ -9,13 +9,19 @@
   const viewerEl = $("viewer");
   const layer = $("interactionLayer");
 
-  const ELEMENT_COLORS = { C: "0xf3b23c", N: "0x4f8dff", O: "0xff5a4f", S: "0xffe14d", P: "0xff9a3c" };
+  const ELEMENT_COLORS = { C: "0xf3b23c", N: "0x4f8dff", O: "0xff5a4f", S: "0xffe14d", P: "0xff9a3c", CL: "0x5fe36a", FE: "0xd9662b" };
+  const METAL_COLOR = "0xffa94d";
   const HBOND_COLOR = "0x52d185";
   const HBOND_SHOW_MIN = 0.2; // これより弱い水素結合は線を描かない
-  const SUCCESS_RMSD = 2.0; // ドッキング研究で「成功」とされる目安（Å）
+  const DEFAULT_SUCCESS_RMSD = 2.0; // ドッキング研究で「成功」とされる目安（Å）
 
   const state = {
+    stages: [],
+    stageIndex: -1,
     stage: null,
+    hasMetal: false,
+    successRmsd: DEFAULT_SUCCESS_RMSD,
+    lastMetalCount: 0,
     viewer: null,
     protein: [],
     grid: null,
@@ -92,6 +98,12 @@
       this.tone(f * 2, { type: "sine", duration: 0.22, volume: 0.07 });
     },
 
+    metalGained(count) {
+      const f = [196.0, 261.63, 329.63, 392.0][Math.min(count, 4) - 1] || 196.0;
+      this.tone(f, { type: "triangle", duration: 0.5, volume: 0.22 });
+      this.tone(f * 3, { type: "sine", duration: 0.4, volume: 0.06 });
+    },
+
     hbondLost() {
       this.tone(330, { type: "sine", duration: 0.12, volume: 0.07, slideTo: 220 });
     },
@@ -138,12 +150,38 @@
   // ---------- 初期化 ----------
 
   function init() {
-    state.stage = (window.DOCKING_STAGES || [])[0];
-    if (!state.stage || !window.$3Dmol) {
+    state.stages = window.DOCKING_STAGES || [];
+    if (!state.stages.length || !window.$3Dmol) {
       $("loading").textContent = "読み込みに失敗しました。ページを再読み込みしてください。";
       return;
     }
-    const stage = state.stage;
+    sound.load();
+    updateSoundButton();
+    state.viewer = $3Dmol.createViewer(viewerEl, { backgroundColor: "#08090a", antialias: true });
+    buildStageButtons();
+    bindEvents();
+    setMode("view");
+    loadStage(0);
+  }
+
+  function buildStageButtons() {
+    const list = $("stageList");
+    list.innerHTML = "";
+    state.stages.forEach((stage, index) => {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "stage";
+      button.textContent = `${index + 1}. ${stage.short || stage.title}`;
+      button.addEventListener("click", () => { if (index !== state.stageIndex) loadStage(index); });
+      list.appendChild(button);
+    });
+  }
+
+  function loadStage(index) {
+    const stage = state.stages[index];
+    state.stageIndex = index;
+    state.stage = stage;
+    document.querySelectorAll(".stage").forEach((b, i) => b.classList.toggle("active", i === index));
     $("stageTitle").textContent = stage.title;
     $("stageBlurb").textContent = stage.blurb;
     $("proteinName").textContent = stage.proteinName;
@@ -153,26 +191,36 @@
     state.protein = S.parsePdbAtoms(stage.proteinPdb, stage.proteinFlags);
     state.grid = S.buildGrid(state.protein);
     state.template = S.makeTemplate(stage.ligand);
+    state.hasMetal = stage.ligand.atoms.some((a) => a.flags & S.FLAG.METAL);
+    state.successRmsd = stage.successRmsd || DEFAULT_SUCCESS_RMSD;
 
     const ref = S.scorePose(state.grid, S.placeLigand(state.template, S.crystalPose(state.template)), state.template);
     state.refRaw = ref.raw;
     state.refParts = ref.parts;
 
-    sound.load();
-    updateSoundButton();
+    // 金属を含むステージだけ、配位結合の表示を出す
+    document.querySelectorAll(".metal-only").forEach((el) => (el.hidden = !state.hasMetal));
+    const canFlex = state.template.torsions.length > 0;
+    $("levelFlex").disabled = !canFlex;
+    $("levelFlex").title = canFlex ? "" : "この分子には、ねじれる結合がありません";
+
     setupViewer();
     buildTorsionControls();
     buildTorsionMarkers();
-    bindEvents();
     setLevel("rigid");
-    setMode("view");
-    showBest();
     $("loading").hidden = true;
   }
 
   function setupViewer() {
-    const viewer = $3Dmol.createViewer(viewerEl, { backgroundColor: "#08090a", antialias: true });
-    state.viewer = viewer;
+    const viewer = state.viewer;
+    viewer.removeAllModels();
+    viewer.removeAllShapes();
+    viewer.removeAllLabels();
+    if (typeof viewer.removeAllSurfaces === "function") viewer.removeAllSurfaces();
+    state.labels.clear();
+    state.surface = null;
+    $("surfaceButton").textContent = "表面を表示";
+
     viewer.addModel(state.stage.proteinPdb, "pdb");
     viewer.setStyle({}, { cartoon: { color: "#7d8796", opacity: 0.8 } });
 
@@ -263,7 +311,8 @@
         torsions: torsions.slice(),
       };
       const sc = S.scorePose(state.grid, S.placeLigand(tpl, pose), tpl);
-      if (sc.counts.clash === 0 && sc.counts.fit < 2) break;
+      // ぶつからず、どの項目にも点が入らない（減点もない）場所から始める
+      if (sc.counts.clash === 0 && sc.counts.fit < 2 && Math.abs(sc.raw) < 0.05) break;
       distance += 2;
     }
     return pose;
@@ -276,6 +325,7 @@
     state.showAnswer = false;
     state.lastResult = null;
     state.lastHbondCount = 0;
+    state.lastMetalCount = 0;
     state.wasClashing = false;
     state.userDriven = false;
     $("result").hidden = true;
@@ -332,6 +382,24 @@
       viewer.addSphere({ center: { x: h.p.x, y: h.p.y, z: h.p.z }, radius: 0.34, color: HBOND_COLOR, alpha: 0.75 });
     }
 
+    // 金属への配位結合（オレンジの点線）
+    const metalShown = score.metalBonds.filter((h) => h.strength >= HBOND_SHOW_MIN);
+    for (const h of metalShown) {
+      const l = placed[h.li];
+      viewer.addCylinder({
+        start: { x: l.x, y: l.y, z: l.z },
+        end: { x: h.p.x, y: h.p.y, z: h.p.z },
+        radius: 0.09 + 0.05 * h.strength,
+        color: METAL_COLOR,
+        dashed: true,
+        dashLength: 0.22,
+        gapLength: 0.14,
+        fromCap: 1,
+        toCap: 1,
+      });
+      viewer.addSphere({ center: { x: h.p.x, y: h.p.y, z: h.p.z }, radius: 0.36, color: METAL_COLOR, alpha: 0.8 });
+    }
+
     // ぶつかっている原子（赤い球）
     const clashAtoms = new Set(score.clashes.map((c) => c.li));
     for (const li of clashAtoms) {
@@ -339,9 +407,9 @@
       viewer.addSphere({ center: { x: l.x, y: l.y, z: l.z }, radius: 0.85, color: "0xff3b30", alpha: 0.45 });
     }
 
-    updateLabels(shown);
+    updateLabels(shown.concat(metalShown), new Set(metalShown.map((h) => h.p.chain + ":" + h.p.resi)));
     viewer.render();
-    updatePanel(score, shown.length, clashAtoms.size > 0 || score.intraClash > 0.3);
+    updatePanel(score, shown.length, clashAtoms.size > 0 || score.intraClash > 0.3, metalShown.length);
     state.currentScore = score;
     state.currentPlaced = placed;
   }
@@ -370,7 +438,7 @@
     for (const atom of atoms) {
       viewer.addSphere({
         center: { x: atom.x, y: atom.y, z: atom.z },
-        radius: (atom.el === "S" ? 0.55 : 0.45) * scale,
+        radius: (atom.el === "FE" ? 0.8 : atom.el === "S" || atom.el === "CL" ? 0.55 : 0.45) * scale,
         color: opts.color || ELEMENT_COLORS[atom.el] || "0xbec7d5",
         alpha,
       });
@@ -378,10 +446,12 @@
   }
 
   // 水素結合の相手のアミノ酸名を表示する。相手の組が変わったときだけ作り直す
-  function updateLabels(hbonds) {
+  function updateLabels(bonds, metalKeys) {
     const wanted = new Map();
-    for (const h of hbonds) {
-      const key = h.p.chain + ":" + h.p.resi;
+    for (const h of bonds) {
+      const residue = h.p.chain + ":" + h.p.resi;
+      // 配位結合の相手はオレンジ、水素結合の相手は緑のラベルにする
+      const key = residue + (metalKeys.has(residue) ? ":m" : ":h");
       if (!wanted.has(key)) wanted.set(key, h.p);
     }
     for (const [key, label] of state.labels) {
@@ -397,7 +467,7 @@
         position: { x: p.x, y: p.y, z: p.z },
         fontColor: "white",
         fontSize: 12,
-        backgroundColor: "0x1f8f56",
+        backgroundColor: key.endsWith(":m") ? "0xb5651d" : "0x1f8f56",
         backgroundOpacity: 0.85,
         borderThickness: 0,
         inFront: true,
@@ -415,9 +485,12 @@
     return Math.max(0, Math.min(100, Math.round((100 * raw) / state.refRaw)));
   }
 
-  function updatePanel(score, hbondCount, clashing) {
+  function updatePanel(score, hbondCount, clashing, metalCount) {
     $("liveScore").textContent = String(toPoints(score.raw));
     $("liveHbond").textContent = String(hbondCount);
+    $("liveMetal").textContent = String(metalCount);
+    if (metalCount > state.lastMetalCount && state.userDriven) sound.metalGained(metalCount);
+    state.lastMetalCount = metalCount;
     $("clashWarning").hidden = !clashing;
 
     if (hbondCount > state.lastHbondCount) {
@@ -655,6 +728,7 @@
   }
 
   function setLevel(level) {
+    if (level === "flex" && !state.template.torsions.length) level = "rigid";
     state.level = level;
     $("levelRigid").classList.toggle("active", level === "rigid");
     $("levelFlex").classList.toggle("active", level === "flex");
@@ -759,7 +833,8 @@
     stopTimer();
     const points = toPoints(state.currentScore.raw);
     const rmsd = S.rmsdToCrystal(state.template, state.currentPlaced);
-    const success = rmsd <= SUCCESS_RMSD;
+    const limit = state.successRmsd;
+    const success = rmsd <= limit;
     state.judged = true;
     state.showAnswer = true;
     state.lastResult = { points, rmsd, seconds: state.elapsed };
@@ -770,10 +845,12 @@
     let headline, note;
     if (success) {
       headline = "ドッキング成功！";
-      note = `ずれが ${SUCCESS_RMSD} Å 以内なら、研究の世界でも「成功」と判定されます。緑色の分子が、実験で決まった本物の結合ポーズです。`;
+      note = limit === DEFAULT_SUCCESS_RMSD
+        ? `ずれが ${limit} Å 以内なら、研究の世界でも「成功」と判定されます。緑色の分子が、実験で決まった本物の結合ポーズです。`
+        : `小さな分子なので、ずれ ${limit} Å 以内を成功としています。緑色の分子が、実験で決まった本物の結合ポーズです。`;
     } else if (rmsd <= 4.5) {
       headline = "惜しい！場所は合っています";
-      note = "緑色の分子が実験で決まった結合ポーズです。向きやねじれを合わせると、水素結合が一気に増えます。";
+      note = "緑色の分子が実験で決まった結合ポーズです。向きを合わせると、結合が一気に増えます。";
     } else {
       headline = "まだ別の場所にいます";
       note = "緑色の分子が実験で決まった結合ポーズです。タンパク質の奥のくぼみを目指してみてください。";
@@ -860,7 +937,7 @@
   }
 
   // 動作確認用に内部状態を公開する
-  window.__dockingLab = { state, S, draw, judge, setMode, setLevel, sound };
+  window.__dockingLab = { state, S, draw, judge, setMode, setLevel, sound, loadStage };
 
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", init);
   else init();
