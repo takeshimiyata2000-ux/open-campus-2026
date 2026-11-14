@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
     <title>ドッキングラボ（試作版）</title>
-    <link rel="stylesheet" href="styles.css?v=1">
+    <link rel="stylesheet" href="styles.css?v=2">
   </head>
   <body>
     <main class="app">
@@ -14,9 +14,12 @@
             <h1>ドッキングラボ <span class="badge">試作版</span></h1>
             <p id="stageTitle" class="subtitle"></p>
           </div>
+          <div class="top-actions">
+          <button id="soundButton" class="sound" type="button" aria-pressed="true">音 ON</button>
           <div class="level-switch" role="group" aria-label="難易度">
             <button id="levelRigid" class="level active" type="button">初級<small>形は固定</small></button>
             <button id="levelFlex" class="level" type="button">上級<small>ねじれあり</small></button>
+          </div>
           </div>
         </header>
 
@@ -114,6 +117,6 @@
     <script src="3Dmol-min.js"></script>
     <script src="scoring.js?v=1"></script>
     <script src="data/avidin-biotin.js?v=1"></script>
-    <script src="app.js?v=1"></script>
+    <script src="app.js?v=2"></script>
   </body>
 </html>

@@ -79,6 +79,9 @@ h2 { font-size: 13px; color: var(--muted); font-weight: 600; margin-bottom: 8px;
 
 .subtitle { color: var(--muted); font-size: 13px; margin-top: 2px; }
 
+.top-actions { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
+.sound { padding: 8px 10px; font-size: 12px; white-space: nowrap; }
+.sound.off { color: var(--muted); }
 .level-switch { display: flex; gap: 6px; flex-shrink: 0; }
 .level { display: flex; flex-direction: column; align-items: center; padding: 6px 14px; line-height: 1.2; }
 .level small { font-size: 10px; color: var(--muted); }

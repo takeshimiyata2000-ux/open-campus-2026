@@ -37,7 +37,101 @@
     judged: false,
     drawQueued: false,
     lastResult: null,
+    userDriven: false, // 直前の変化がプレイヤーの操作によるものか（効果音を鳴らすかの判定）
+    wasClashing: false,
   };
+
+  // ---------- 効果音（Web Audio で合成。音声ファイルは使わない） ----------
+
+  const sound = {
+    ctx: null,
+    enabled: true,
+    lastClashAt: 0,
+    // 水素結合が増えるほど音が上がっていく（ペンタトニック音階）
+    scale: [523.25, 587.33, 659.25, 783.99, 880.0, 1046.5, 1174.66, 1318.51, 1567.98, 1760.0, 2093.0, 2349.32],
+
+    load() {
+      try { this.enabled = localStorage.getItem("dockingLab:sound") !== "off"; } catch (e) { /* 無視 */ }
+    },
+
+    // ブラウザの制約で、最初のクリックやタップの後でないと音を出せない
+    unlock() {
+      if (!this.enabled) return;
+      try {
+        if (!this.ctx) {
+          const Ctx = window.AudioContext || window.webkitAudioContext;
+          if (!Ctx) return;
+          this.ctx = new Ctx();
+        }
+        if (this.ctx.state === "suspended") this.ctx.resume();
+      } catch (e) { /* 音なしで続ける */ }
+    },
+
+    tone(freq, { type = "sine", start = 0, duration = 0.18, volume = 0.16, slideTo = null } = {}) {
+      if (!this.enabled || !this.ctx || this.ctx.state !== "running") return;
+      const ctx = this.ctx;
+      const t0 = ctx.currentTime + start;
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = type;
+      osc.frequency.setValueAtTime(freq, t0);
+      if (slideTo) osc.frequency.exponentialRampToValueAtTime(slideTo, t0 + duration);
+      gain.gain.setValueAtTime(0.0001, t0);
+      gain.gain.exponentialRampToValueAtTime(volume, t0 + 0.012);
+      gain.gain.exponentialRampToValueAtTime(0.0001, t0 + duration);
+      osc.connect(gain).connect(ctx.destination);
+      osc.start(t0);
+      osc.stop(t0 + duration + 0.03);
+    },
+
+    hbondGained(count) {
+      const f = this.scale[Math.min(count, this.scale.length) - 1] || this.scale[0];
+      this.tone(f, { type: "triangle", duration: 0.32, volume: 0.2 });
+      this.tone(f * 2, { type: "sine", duration: 0.22, volume: 0.07 });
+    },
+
+    hbondLost() {
+      this.tone(330, { type: "sine", duration: 0.12, volume: 0.07, slideTo: 220 });
+    },
+
+    clash() {
+      const now = Date.now();
+      if (now - this.lastClashAt < 450) return;
+      this.lastClashAt = now;
+      this.tone(110, { type: "square", duration: 0.11, volume: 0.07, slideTo: 70 });
+    },
+
+    click() {
+      this.tone(660, { type: "sine", duration: 0.05, volume: 0.06 });
+    },
+
+    judge(kind) {
+      if (kind === "success") {
+        [523.25, 659.25, 783.99, 1046.5].forEach((f, i) => this.tone(f, { type: "triangle", start: i * 0.11, duration: 0.3, volume: 0.2 }));
+        this.tone(1318.51, { type: "triangle", start: 0.44, duration: 0.6, volume: 0.2 });
+      } else if (kind === "near") {
+        this.tone(523.25, { type: "triangle", duration: 0.2, volume: 0.17 });
+        this.tone(659.25, { type: "triangle", start: 0.16, duration: 0.32, volume: 0.17 });
+      } else {
+        this.tone(293.66, { type: "triangle", duration: 0.2, volume: 0.15 });
+        this.tone(220, { type: "triangle", start: 0.16, duration: 0.36, volume: 0.15 });
+      }
+    },
+  };
+
+  function toggleSound() {
+    sound.enabled = !sound.enabled;
+    try { localStorage.setItem("dockingLab:sound", sound.enabled ? "on" : "off"); } catch (e) { /* 無視 */ }
+    updateSoundButton();
+    if (sound.enabled) { sound.unlock(); sound.click(); }
+  }
+
+  function updateSoundButton() {
+    const button = $("soundButton");
+    button.textContent = sound.enabled ? "音 ON" : "音 OFF";
+    button.setAttribute("aria-pressed", String(sound.enabled));
+    button.classList.toggle("off", !sound.enabled);
+  }
 
   // ---------- 初期化 ----------
 
@@ -62,6 +156,8 @@
     state.refRaw = ref.raw;
     state.refParts = ref.parts;
 
+    sound.load();
+    updateSoundButton();
     setupViewer();
     buildTorsionControls();
     bindEvents();
@@ -176,6 +272,9 @@
     state.judged = false;
     state.showAnswer = false;
     state.lastResult = null;
+    state.lastHbondCount = 0;
+    state.wasClashing = false;
+    state.userDriven = false;
     $("result").hidden = true;
     stopTimer();
     state.elapsed = 0;
@@ -320,8 +419,14 @@
       el.classList.remove("pulse");
       void el.offsetWidth;
       el.classList.add("pulse");
+      if (state.userDriven) sound.hbondGained(hbondCount);
+    } else if (hbondCount < state.lastHbondCount && state.userDriven) {
+      sound.hbondLost();
     }
+    if (clashing && !state.wasClashing && state.userDriven) sound.clash();
     state.lastHbondCount = hbondCount;
+    state.wasClashing = clashing;
+    state.userDriven = false;
 
     document.querySelectorAll(".breakdown li").forEach((li) => {
       const term = li.dataset.term;
@@ -411,6 +516,7 @@
       $("result").hidden = true;
     }
     startTimer();
+    state.userDriven = true;
     requestDraw();
   }
 
@@ -421,6 +527,9 @@
     $("resetButton").addEventListener("click", resetPose);
     $("judgeButton").addEventListener("click", judge);
     $("surfaceButton").addEventListener("click", toggleSurface);
+    $("soundButton").addEventListener("click", toggleSound);
+    // 最初の操作で音を出せる状態にする
+    ["pointerdown", "keydown", "touchend"].forEach((t) => window.addEventListener(t, () => sound.unlock(), { capture: true, passive: true }));
 
     holdButton($("depthIn"), () => { moveDepth(0.5); touched(); });
     holdButton($("depthOut"), () => { moveDepth(-0.5); touched(); });
@@ -526,6 +635,7 @@
   }
 
   function setMode(mode) {
+    if (state.mode !== mode) sound.click();
     state.mode = mode;
     document.querySelectorAll(".mode").forEach((b) => b.classList.toggle("active", b.dataset.mode === mode));
     layer.classList.toggle("active", mode !== "view");
@@ -620,6 +730,8 @@
       headline = "まだ別の場所にいます";
       note = "緑色の分子が実験で決まった結合ポーズです。タンパク質の奥のくぼみを目指してみてください。";
     }
+    sound.unlock();
+    sound.judge(success ? "success" : rmsd <= 4.5 ? "near" : "far");
     $("resultHeadline").textContent = headline;
     $("resultScore").textContent = points + " 点";
     $("resultRmsd").textContent = rmsd.toFixed(1) + " Å";
@@ -700,7 +812,7 @@
   }
 
   // 動作確認用に内部状態を公開する
-  window.__dockingLab = { state, S, draw, judge, setMode, setLevel };
+  window.__dockingLab = { state, S, draw, judge, setMode, setLevel, sound };
 
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", init);
   else init();
