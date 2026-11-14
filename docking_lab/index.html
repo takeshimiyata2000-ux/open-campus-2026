@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <title>ドッキングラボ（試作版）</title>
+    <link rel="stylesheet" href="styles.css?v=1">
+  </head>
+  <body>
+    <main class="app">
+      <section class="viewer-panel">
+        <header class="topbar">
+          <div>
+            <h1>ドッキングラボ <span class="badge">試作版</span></h1>
+            <p id="stageTitle" class="subtitle"></p>
+          </div>
+          <div class="level-switch" role="group" aria-label="難易度">
+            <button id="levelRigid" class="level active" type="button">初級<small>形は固定</small></button>
+            <button id="levelFlex" class="level" type="button">上級<small>ねじれあり</small></button>
+          </div>
+        </header>
+
+        <div class="viewer-wrap">
+          <div id="viewer" aria-label="タンパク質と低分子の 3D ビュー"></div>
+          <div id="interactionLayer" aria-hidden="true"></div>
+
+          <div class="hud">
+            <div class="hud-score">
+              <span class="hud-label">スコア</span>
+              <strong id="liveScore">0</strong>
+              <span class="hud-unit">点</span>
+            </div>
+            <div class="hud-hbond">
+              <span class="dot"></span>水素結合 <strong id="liveHbond">0</strong> 本
+            </div>
+            <div id="clashWarning" class="hud-clash" hidden>ぶつかっています</div>
+          </div>
+
+          <div class="timer">経過 <strong id="timer">0:00</strong></div>
+          <div id="loading" class="loading">構造を読み込み中…</div>
+        </div>
+      </section>
+
+      <aside class="control-panel">
+        <section>
+          <p id="stageBlurb" class="blurb"></p>
+          <dl class="facts">
+            <div><dt>タンパク質</dt><dd id="proteinName"></dd></div>
+            <div><dt>低分子</dt><dd id="ligandName"></dd></div>
+            <div><dt>構造データ</dt><dd id="pdbId"></dd></div>
+          </dl>
+        </section>
+
+        <section>
+          <h2>操作モード</h2>
+          <div class="modes">
+            <button id="modeView" class="mode active" type="button" data-mode="view">視点<small>1</small></button>
+            <button id="modeMove" class="mode" type="button" data-mode="move">移動<small>2</small></button>
+            <button id="modeRotate" class="mode" type="button" data-mode="rotate">回転<small>3</small></button>
+          </div>
+          <p id="modeHelp" class="help"></p>
+          <div class="depth">
+            <button id="depthIn" type="button">奥へ</button>
+            <button id="depthOut" type="button">手前へ</button>
+          </div>
+        </section>
+
+        <section id="torsionSection" hidden>
+          <h2>結合をねじる</h2>
+          <div id="torsionList" class="torsions"></div>
+        </section>
+
+        <section>
+          <h2>スコアの内訳</h2>
+          <ul class="breakdown">
+            <li data-term="hbond"><span class="term">水素結合</span><span class="bar"><i></i></span><b>0</b></li>
+            <li data-term="fit"><span class="term">ポケットへの収まり</span><span class="bar"><i></i></span><b>0</b></li>
+            <li data-term="hydrophobic"><span class="term">疎水性の接触</span><span class="bar"><i></i></span><b>0</b></li>
+            <li data-term="electrostatic"><span class="term">静電相互作用</span><span class="bar"><i></i></span><b>0</b></li>
+            <li data-term="clash" class="negative"><span class="term">衝突（減点）</span><span class="bar"><i></i></span><b>0</b></li>
+          </ul>
+          <p class="help">実験で決まった結晶構造のポーズを 100 点として換算しています。</p>
+        </section>
+
+        <section>
+          <button id="judgeButton" class="primary" type="button">答え合わせ</button>
+          <div id="result" class="result" hidden>
+            <p id="resultHeadline" class="result-headline"></p>
+            <dl class="facts">
+              <div><dt>スコア</dt><dd id="resultScore"></dd></div>
+              <div><dt>結晶構造とのずれ（RMSD）</dt><dd id="resultRmsd"></dd></div>
+              <div><dt>時間</dt><dd id="resultTime"></dd></div>
+            </dl>
+            <p id="resultNote" class="help"></p>
+          </div>
+          <div class="row">
+            <button id="resetButton" type="button">やり直す</button>
+            <button id="surfaceButton" type="button">表面を表示</button>
+          </div>
+          <p id="bestRecord" class="help"></p>
+        </section>
+
+        <section>
+          <h2>色の見方</h2>
+          <ul class="legend">
+            <li><span class="swatch hb"></span>緑の点線: 水素結合</li>
+            <li><span class="swatch clash"></span>赤い球: ぶつかっている原子</li>
+            <li><span class="swatch answer"></span>緑の分子: 結晶構造での正解</li>
+          </ul>
+        </section>
+      </aside>
+    </main>
+
+    <script src="3Dmol-min.js"></script>
+    <script src="scoring.js?v=1"></script>
+    <script src="data/avidin-biotin.js?v=1"></script>
+    <script src="app.js?v=1"></script>
+  </body>
+</html>
