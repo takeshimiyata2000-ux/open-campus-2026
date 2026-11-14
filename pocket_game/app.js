@@ -395,11 +395,15 @@ function bindEvents() {
     redrawSceneExtras();
   });
 
-  interactionLayer.addEventListener("pointerup", (event) => {
+  const endDrag = (event) => {
     state.dragging = false;
     interactionLayer.classList.remove("dragging");
-    interactionLayer.releasePointerCapture(event.pointerId);
-  });
+    if (interactionLayer.hasPointerCapture && interactionLayer.hasPointerCapture(event.pointerId)) {
+      interactionLayer.releasePointerCapture(event.pointerId);
+    }
+  };
+  interactionLayer.addEventListener("pointerup", endDrag);
+  interactionLayer.addEventListener("pointercancel", endDrag);
 
   document.querySelectorAll("[data-nudge]").forEach((button) => {
     button.addEventListener("click", () => {

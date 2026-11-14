@@ -264,6 +264,9 @@ h2 {
   display: none;
   cursor: grab;
   z-index: 5;
+  touch-action: none; /* タッチ操作でスクロールに奪われず、ドラッグを回転・移動に使う */
+  -webkit-user-select: none;
+  user-select: none;
 }
 
 #interactionLayer.active {
