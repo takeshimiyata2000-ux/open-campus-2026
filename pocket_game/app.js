@@ -370,16 +370,37 @@ function bindEvents() {
     redrawSceneExtras();
   }, { passive: false });
 
-  interactionLayer.addEventListener("pointerdown", (event) => {
+  // ドラッグ開始。pointerdown が来ない環境（別のボタンが押されたままのマウスなど）でも
+  // pointermove の buttons（左ボタン）から開始できるようにする。
+  const startDrag = (event) => {
+    if (state.dragging) return;
     maybeStartTimer();
     state.dragging = true;
     state.last = { x: event.clientX, y: event.clientY };
     interactionLayer.classList.add("dragging");
-    interactionLayer.setPointerCapture(event.pointerId);
-  });
+    try { interactionLayer.setPointerCapture(event.pointerId); } catch (e) { /* 無視 */ }
+  };
+
+  const endDrag = (event) => {
+    state.dragging = false;
+    interactionLayer.classList.remove("dragging");
+    try {
+      if (interactionLayer.hasPointerCapture && interactionLayer.hasPointerCapture(event.pointerId)) {
+        interactionLayer.releasePointerCapture(event.pointerId);
+      }
+    } catch (e) { /* 無視 */ }
+  };
+
+  interactionLayer.addEventListener("pointerdown", startDrag);
 
   interactionLayer.addEventListener("pointermove", (event) => {
-    if (!state.dragging) return;
+    const leftDown = (event.buttons & 1) === 1;
+    if (!state.dragging) {
+      if (!leftDown) return;
+      startDrag(event); // pointerdown が来なかった場合の保険
+      return;
+    }
+    if (!leftDown) { endDrag(event); return; } // pointerup を取りこぼした場合の保険
     const dx = event.clientX - state.last.x;
     const dy = event.clientY - state.last.y;
     state.last = { x: event.clientX, y: event.clientY };
@@ -396,13 +417,6 @@ function bindEvents() {
     redrawSceneExtras();
   });
 
-  const endDrag = (event) => {
-    state.dragging = false;
-    interactionLayer.classList.remove("dragging");
-    if (interactionLayer.hasPointerCapture && interactionLayer.hasPointerCapture(event.pointerId)) {
-      interactionLayer.releasePointerCapture(event.pointerId);
-    }
-  };
   interactionLayer.addEventListener("pointerup", endDrag);
   interactionLayer.addEventListener("pointercancel", endDrag);
 
