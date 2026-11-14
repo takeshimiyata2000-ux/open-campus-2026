@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
     <title>ドッキングラボ（試作版）</title>
-    <link rel="stylesheet" href="styles.css?v=2">
+    <link rel="stylesheet" href="styles.css?v=3">
   </head>
   <body>
     <main class="app">
@@ -26,6 +26,7 @@
         <div class="viewer-wrap">
           <div id="viewer" aria-label="タンパク質と低分子の 3D ビュー"></div>
           <div id="interactionLayer" aria-hidden="true"></div>
+          <div id="torsionMarkers" class="torsion-markers" aria-hidden="true" hidden></div>
 
           <div class="hud">
             <div class="hud-score">
@@ -117,6 +118,6 @@
     <script src="3Dmol-min.js"></script>
     <script src="scoring.js?v=1"></script>
     <script src="data/avidin-biotin.js?v=1"></script>
-    <script src="app.js?v=2"></script>
+    <script src="app.js?v=3"></script>
   </body>
 </html>

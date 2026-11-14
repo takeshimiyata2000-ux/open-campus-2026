@@ -39,6 +39,8 @@
     lastResult: null,
     userDriven: false, // 直前の変化がプレイヤーの操作によるものか（効果音を鳴らすかの判定）
     wasClashing: false,
+    torsionMarkers: [],
+    markerLoop: null,
   };
 
   // ---------- 効果音（Web Audio で合成。音声ファイルは使わない） ----------
@@ -160,6 +162,7 @@
     updateSoundButton();
     setupViewer();
     buildTorsionControls();
+    buildTorsionMarkers();
     bindEvents();
     setLevel("rigid");
     setMode("view");
@@ -309,7 +312,7 @@
     viewer.removeAllShapes();
 
     if (state.showAnswer) drawMolecule(tpl.crystal, tpl.bonds, { color: "0x3ddc84", alpha: 0.55, scale: 0.85 });
-    drawMolecule(placed, tpl.bonds, { highlightTorsion: state.activeTorsion });
+    drawMolecule(placed, tpl.bonds, { highlightTorsion: state.activeTorsion, markTorsions: state.level === "flex" });
 
     // 水素結合（緑の点線）
     const shown = score.hbonds.filter((h) => h.strength >= HBOND_SHOW_MIN);
@@ -348,14 +351,17 @@
     const alpha = opts.alpha == null ? 1 : opts.alpha;
     const scale = opts.scale || 1;
     const hl = opts.highlightTorsion >= 0 ? state.template.torsions[opts.highlightTorsion] : null;
+    const sameBond = (t, i, j) => (t.a === i && t.b === j) || (t.a === j && t.b === i);
     for (const [i, j] of bonds) {
       const a = atoms[i], b = atoms[j];
-      const isHl = hl && ((hl.a === i && hl.b === j) || (hl.a === j && hl.b === i));
+      const isHl = hl && sameBond(hl, i, j);
+      // 上級では、ねじれる結合を水色にして見分けられるようにする
+      const isTorsion = opts.markTorsions && state.template.torsions.some((t) => sameBond(t, i, j));
       viewer.addCylinder({
         start: { x: a.x, y: a.y, z: a.z },
         end: { x: b.x, y: b.y, z: b.z },
         radius: (isHl ? 0.3 : 0.2) * scale,
-        color: isHl ? "0x49c6e5" : opts.color || "0xffe08a",
+        color: isHl ? "0x49c6e5" : isTorsion ? "0x8fd8ee" : opts.color || "0xffe08a",
         alpha,
         fromCap: 1,
         toCap: 1,
@@ -656,6 +662,7 @@
     state.activeTorsion = -1;
     resetPose();
     showBest();
+    startTorsionMarkers();
   }
 
   // ---------- ねじれ ----------
@@ -691,6 +698,47 @@
       });
       list.appendChild(row);
     });
+  }
+
+  // ねじれる結合の番号を、分子の上に小さく重ねて表示する（上級のみ）。
+  // 視点を回したときも追従するよう、毎フレーム位置を更新する。
+  function buildTorsionMarkers() {
+    const box = $("torsionMarkers");
+    box.innerHTML = "";
+    state.torsionMarkers = state.torsionOrder.map((index, n) => {
+      const el = document.createElement("span");
+      el.className = "torsion-marker";
+      el.textContent = String(n + 1);
+      box.appendChild(el);
+      return { index, el };
+    });
+  }
+
+  function updateTorsionMarkers() {
+    state.markerLoop = null;
+    const box = $("torsionMarkers");
+    const visible = state.level === "flex" && state.currentPlaced && typeof state.viewer.modelToScreen === "function";
+    box.hidden = !visible;
+    if (!visible) return;
+    const wrap = box.getBoundingClientRect();
+    const placed = state.currentPlaced;
+    for (const marker of state.torsionMarkers) {
+      const t = state.template.torsions[marker.index];
+      const a = placed[t.a], b = placed[t.b];
+      const p = state.viewer.modelToScreen({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2, z: (a.z + b.z) / 2 });
+      // modelToScreen はページ基準（スクロール込み）の座標を返すので、表示枠基準に直す
+      const x = p.x - window.pageXOffset - wrap.left;
+      const y = p.y - window.pageYOffset - wrap.top;
+      const inside = x > 0 && y > 0 && x < wrap.width && y < wrap.height;
+      marker.el.style.display = inside ? "" : "none";
+      marker.el.style.transform = `translate(${x.toFixed(1)}px, ${y.toFixed(1)}px)`;
+      marker.el.classList.toggle("active", marker.index === state.activeTorsion);
+    }
+    state.markerLoop = requestAnimationFrame(updateTorsionMarkers);
+  }
+
+  function startTorsionMarkers() {
+    if (state.markerLoop == null) state.markerLoop = requestAnimationFrame(updateTorsionMarkers);
   }
 
   function syncTorsionControls() {

@@ -266,3 +266,24 @@ h2 { font-size: 13px; color: var(--muted); font-weight: 600; margin-bottom: 8px;
   .mode small { display: none; }
   .control-panel > section:first-child { order: 9; }
 }
+
+/* ねじれる結合の番号（分子の上に重ねる小さな印） */
+.torsion-markers { position: absolute; inset: 0; z-index: 6; pointer-events: none; overflow: hidden; }
+.torsion-markers[hidden] { display: none; }
+.torsion-marker {
+  position: absolute;
+  left: 0; top: 0;
+  width: 15px; height: 15px;
+  margin: -7.5px 0 0 -7.5px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  border: 1px solid rgba(73, 198, 229, 0.9);
+  background: rgba(8, 9, 10, 0.72);
+  color: #bfefff;
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 1;
+  will-change: transform;
+}
+.torsion-marker.active { background: #49c6e5; color: #06222b; }
