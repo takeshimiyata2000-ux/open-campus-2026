@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
     <title>ドッキングラボ（試作版）</title>
-    <link rel="stylesheet" href="styles.css?v=4">
+    <link rel="stylesheet" href="styles.css?v=5">
   </head>
   <body>
     <main class="app">
@@ -27,6 +27,7 @@
           <div id="viewer" aria-label="タンパク質と低分子の 3D ビュー"></div>
           <div id="interactionLayer" aria-hidden="true"></div>
           <div id="torsionMarkers" class="torsion-markers" aria-hidden="true" hidden></div>
+          <div id="clashMarkers" class="torsion-markers" aria-hidden="true"><span class="clash-marker"></span><span class="clash-marker"></span><span class="clash-marker"></span><span class="clash-marker"></span></div>
 
           <div class="hud">
             <div class="hud-score">
@@ -92,6 +93,7 @@
             <li data-term="electrostatic"><span class="term">静電相互作用</span><span class="bar"><i></i></span><b>0</b></li>
             <li data-term="clash" class="negative"><span class="term">衝突（減点）</span><span class="bar"><i></i></span><b>0</b></li>
           </ul>
+          <p id="clashDetail" class="clash-detail"></p>
           <p class="help">実験で決まった結晶構造のポーズを 100 点として換算しています。</p>
         </section>
 
@@ -126,10 +128,10 @@
     </main>
 
     <script src="3Dmol-min.js"></script>
-    <script src="scoring.js?v=2"></script>
+    <script src="scoring.js?v=3"></script>
     <script src="data/avidin-biotin.js?v=2"></script>
     <script src="data/lactoferrin-iron.js?v=1"></script>
     <script src="data/estrogen-raloxifene.js?v=1"></script>
-    <script src="app.js?v=4"></script>
+    <script src="app.js?v=5"></script>
   </body>
 </html>

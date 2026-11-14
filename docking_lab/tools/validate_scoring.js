@@ -10,6 +10,7 @@ const stage = globalThis.DOCKING_STAGES[0];
 const protein = S.parsePdbAtoms(stage.proteinPdb, stage.proteinFlags);
 const grid = S.buildGrid(protein);
 const tpl = S.makeTemplate(stage.ligand);
+console.log("結晶構造で近接している原子の組（衝突から除外）:", S.calibrateClash(grid, tpl));
 
 let seed = 12345;
 const rand = () => ((seed = (seed * 1664525 + 1013904223) >>> 0) / 4294967296);

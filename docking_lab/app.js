@@ -13,6 +13,7 @@
   const METAL_COLOR = "0xffa94d";
   const HBOND_COLOR = "0x52d185";
   const HBOND_SHOW_MIN = 0.2; // これより弱い水素結合は線を描かない
+  const CLASH_SHOW_MIN = 0.08; // これより小さい重なり（Å）は表示しない
   const DEFAULT_SUCCESS_RMSD = 2.0; // ドッキング研究で「成功」とされる目安（Å）
 
   const state = {
@@ -46,6 +47,7 @@
     userDriven: false, // 直前の変化がプレイヤーの操作によるものか（効果音を鳴らすかの判定）
     wasClashing: false,
     torsionMarkers: [],
+    clashPoints: [],
     markerLoop: null,
   };
 
@@ -162,6 +164,7 @@
     bindEvents();
     setMode("view");
     loadStage(0);
+    startTorsionMarkers();
   }
 
   function buildStageButtons() {
@@ -191,6 +194,7 @@
     state.protein = S.parsePdbAtoms(stage.proteinPdb, stage.proteinFlags);
     state.grid = S.buildGrid(state.protein);
     state.template = S.makeTemplate(stage.ligand);
+    S.calibrateClash(state.grid, state.template);
     state.hasMetal = stage.ligand.atoms.some((a) => a.flags & S.FLAG.METAL);
     state.successRmsd = stage.successRmsd || DEFAULT_SUCCESS_RMSD;
 
@@ -400,12 +404,36 @@
       viewer.addSphere({ center: { x: h.p.x, y: h.p.y, z: h.p.z }, radius: 0.36, color: METAL_COLOR, alpha: 0.8 });
     }
 
-    // ぶつかっている原子（赤い球）
-    const clashAtoms = new Set(score.clashes.map((c) => c.li));
-    for (const li of clashAtoms) {
-      const l = placed[li];
-      viewer.addSphere({ center: { x: l.x, y: l.y, z: l.z }, radius: 0.85, color: "0xff3b30", alpha: 0.45 });
+    // ぶつかっている原子の組（低分子側とタンパク質側の両方を赤い球で示し、赤い棒でつなぐ）
+    const clashPairs = score.clashes.filter((c) => c.overlap >= CLASH_SHOW_MIN).sort((a, b) => b.overlap - a.overlap);
+    const clashAtoms = new Set();
+    const clashProtein = new Set();
+    for (const c of clashPairs) {
+      const l = placed[c.li];
+      if (!clashAtoms.has(c.li)) {
+        clashAtoms.add(c.li);
+        viewer.addSphere({ center: { x: l.x, y: l.y, z: l.z }, radius: 0.9, color: "0xff5040", alpha: 0.85 });
+      }
+      if (!clashProtein.has(c.p.index)) {
+        clashProtein.add(c.p.index);
+        viewer.addSphere({ center: { x: c.p.x, y: c.p.y, z: c.p.z }, radius: 0.8, color: "0xff5040", alpha: 0.85 });
+      }
+      viewer.addCylinder({
+        start: { x: l.x, y: l.y, z: l.z }, end: { x: c.p.x, y: c.p.y, z: c.p.z },
+        radius: 0.16, color: "0xff2d20", fromCap: 1, toCap: 1,
+      });
     }
+    // 画面上の目印（タンパク質の陰に隠れていても見える）は、重なりの大きい順に 4 か所まで
+    state.clashPoints = clashPairs.slice(0, 4).map((c) => {
+      const l = placed[c.li];
+      return { x: (l.x + c.p.x) / 2, y: (l.y + c.p.y) / 2, z: (l.z + c.p.z) / 2 };
+    });
+    const clashNames = [];
+    for (const c of clashPairs) {
+      const name = residueName(c.p.res) + c.p.resi;
+      if (!clashNames.includes(name)) clashNames.push(name);
+    }
+    $("clashDetail").textContent = clashNames.length ? "ぶつかっている相手: " + clashNames.slice(0, 4).join("、") + (clashNames.length > 4 ? " ほか" : "") : "";
 
     updateLabels(shown.concat(metalShown), new Set(metalShown.map((h) => h.p.chain + ":" + h.p.resi)));
     viewer.render();
@@ -788,27 +816,43 @@
     });
   }
 
+  // 分子の上に重ねる目印（ねじれる結合の番号、衝突の位置）を毎フレーム更新する
   function updateTorsionMarkers() {
-    state.markerLoop = null;
-    const box = $("torsionMarkers");
-    const visible = state.level === "flex" && state.currentPlaced && typeof state.viewer.modelToScreen === "function";
-    box.hidden = !visible;
-    if (!visible) return;
-    const wrap = box.getBoundingClientRect();
-    const placed = state.currentPlaced;
-    for (const marker of state.torsionMarkers) {
-      const t = state.template.torsions[marker.index];
-      const a = placed[t.a], b = placed[t.b];
-      const p = state.viewer.modelToScreen({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2, z: (a.z + b.z) / 2 });
+    state.markerLoop = requestAnimationFrame(updateTorsionMarkers);
+    const viewer = state.viewer;
+    if (!viewer || typeof viewer.modelToScreen !== "function" || !state.currentPlaced) return;
+    const wrap = viewerEl.getBoundingClientRect();
+    const project = (point) => {
+      const p = viewer.modelToScreen(point);
       // modelToScreen はページ基準（スクロール込み）の座標を返すので、表示枠基準に直す
       const x = p.x - window.pageXOffset - wrap.left;
       const y = p.y - window.pageYOffset - wrap.top;
-      const inside = x > 0 && y > 0 && x < wrap.width && y < wrap.height;
-      marker.el.style.display = inside ? "" : "none";
-      marker.el.style.transform = `translate(${x.toFixed(1)}px, ${y.toFixed(1)}px)`;
-      marker.el.classList.toggle("active", marker.index === state.activeTorsion);
+      return { x, y, inside: x > 0 && y > 0 && x < wrap.width && y < wrap.height };
+    };
+
+    const box = $("torsionMarkers");
+    const showTorsions = state.level === "flex";
+    box.hidden = !showTorsions;
+    if (showTorsions) {
+      const placed = state.currentPlaced;
+      for (const marker of state.torsionMarkers) {
+        const t = state.template.torsions[marker.index];
+        const a = placed[t.a], b = placed[t.b];
+        const p = project({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2, z: (a.z + b.z) / 2 });
+        marker.el.style.display = p.inside ? "" : "none";
+        marker.el.style.transform = `translate(${p.x.toFixed(1)}px, ${p.y.toFixed(1)}px)`;
+        marker.el.classList.toggle("active", marker.index === state.activeTorsion);
+      }
     }
-    state.markerLoop = requestAnimationFrame(updateTorsionMarkers);
+
+    const clashEls = $("clashMarkers").children;
+    for (let i = 0; i < clashEls.length; i++) {
+      const point = state.clashPoints[i];
+      if (!point) { clashEls[i].style.display = "none"; continue; }
+      const p = project(point);
+      clashEls[i].style.display = p.inside ? "block" : "none";
+      clashEls[i].style.transform = `translate(${p.x.toFixed(1)}px, ${p.y.toFixed(1)}px)`;
+    }
   }
 
   function startTorsionMarkers() {
