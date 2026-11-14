@@ -626,25 +626,6 @@ function drawLigand() {
         alpha,
       });
     }
-
-    // 表面の裏に入っても見失わないよう、常に最前面に出るラベルを低分子の上に付ける
-    if (!multi || index === state.activeLigand) {
-      const c = centroid(atoms);
-      const stage = STAGES[state.stageIndex];
-      const base = String(stage.ligandName || "低分子").split("（")[0];
-      state.viewer.addLabel(multi ? `${base} ${index + 1}` : base, {
-        position: { x: c.x, y: c.y, z: c.z },
-        fontSize: 15,
-        fontColor: "#1a1a1a",
-        backgroundColor: "#ffd24a",
-        backgroundOpacity: 0.95,
-        borderColor: "#ffffff",
-        borderThickness: 1,
-        inFront: true,
-        showBackground: true,
-        alignment: "bottomCenter",
-      });
-    }
   });
 }
 
