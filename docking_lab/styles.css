@@ -328,3 +328,19 @@ button:disabled { opacity: 0.4; cursor: not-allowed; }
 .dragging-ligand .clash-marker { opacity: 0.14; }
 .dragging-ligand .clash-marker::after { animation: none; opacity: 0; }
 .clash-detail { color: var(--bad); font-size: 12px; font-weight: 600; margin-top: 8px; min-height: 1.2em; }
+
+/* おたすけ */
+.assist { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+.assist button { padding: 9px 4px; font-size: 12px; }
+.assist button.busy { border-color: var(--accent); color: var(--accent); }
+
+/* コンピュータと対決 */
+.cpu { width: 100%; font-weight: 600; border-color: #6f58b8; color: #d9c9ff; }
+.cpu-status { color: #d9c9ff; min-height: 1.2em; }
+.hud-cpu strong { color: #b18cff; }
+.hud-cpu .dot { background: #b18cff; }
+.result-cpu { margin-top: 8px; font-weight: 700; color: #d9c9ff; }
+.swatch.cpu { border-top: 4px solid #b18cff; opacity: 0.8; }
+.cpu-levels { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin-bottom: 6px; }
+.cpu-level { padding: 7px 4px; font-size: 12px; }
+.cpu-level.active { background: #6f58b8; border-color: #6f58b8; color: #fff; font-weight: 700; }

@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
     <title>ドッキングラボ（試作版）</title>
-    <link rel="stylesheet" href="styles.css?v=6">
+    <link rel="stylesheet" href="styles.css?v=7">
   </head>
   <body>
     <main class="app">
@@ -40,6 +40,9 @@
             </div>
             <div class="hud-hbond hud-metal metal-only" hidden>
               <span class="dot"></span>配位結合 <strong id="liveMetal">0</strong> 本
+            </div>
+            <div id="cpuChip" class="hud-hbond hud-cpu" hidden>
+              <span class="dot"></span>コンピュータ <strong id="cpuScore">0</strong> 点
             </div>
             <div id="clashWarning" class="hud-clash" hidden>ぶつかっています</div>
           </div>
@@ -78,6 +81,16 @@
           </div>
         </section>
 
+        <section>
+          <h2>おたすけ</h2>
+          <div class="assist">
+            <button id="assistNear" type="button">近くへ移動</button>
+            <button id="assistRefine" type="button">自動で微調整</button>
+            <button id="assistAnswer" type="button">答えの場所へ</button>
+          </div>
+          <p class="help">「自動で微調整」は、今の場所から点数が上がる方向へ少しずつ動かします。おたすけを使った回は、自己ベストには記録されません。</p>
+        </section>
+
         <section id="torsionSection" hidden>
           <h2>結合をねじる</h2>
           <div id="torsionList" class="torsions"></div>
@@ -98,6 +111,18 @@
         </section>
 
         <section>
+          <h2>コンピュータと対決</h2>
+          <div class="cpu-levels" role="group" aria-label="コンピュータの強さ">
+            <button class="cpu-level active" type="button" data-level="weak">よわい</button>
+            <button class="cpu-level" type="button" data-level="normal">ふつう</button>
+            <button class="cpu-level" type="button" data-level="strong">つよい</button>
+          </div>
+          <button id="cpuButton" class="cpu" type="button">コンピュータと対決する</button>
+          <p id="cpuStatus" class="help cpu-status"></p>
+          <p class="help">コンピュータは、ポケットのあたりで分子をランダムに動かし、点数が上がる置き方を 45〜60 秒間探します。強いほど、たくさん試します。実際のドッキング計算と同じ考え方です。紫色の分子がコンピュータです。</p>
+        </section>
+
+        <section>
           <button id="judgeButton" class="primary" type="button">答え合わせ</button>
           <div id="result" class="result" hidden>
             <p id="resultHeadline" class="result-headline"></p>
@@ -106,6 +131,8 @@
               <div><dt>結晶構造とのずれ（RMSD）</dt><dd id="resultRmsd"></dd></div>
               <div><dt>時間</dt><dd id="resultTime"></dd></div>
             </dl>
+            <p id="resultCpu" class="result-cpu" hidden><span id="resultCpuText"></span></p>
+            <p id="resultAssist" class="help" hidden>おたすけを使ったので、自己ベストには記録していません。</p>
             <p id="resultNote" class="help"></p>
           </div>
           <div class="row">
@@ -122,6 +149,7 @@
             <li class="metal-only" hidden><span class="swatch metal"></span>オレンジの点線: 金属への配位結合</li>
             <li><span class="swatch clash"></span>赤い球: ぶつかっている原子</li>
             <li><span class="swatch answer"></span>緑の分子: 結晶構造での正解</li>
+            <li><span class="swatch cpu"></span>紫の分子: コンピュータ</li>
           </ul>
         </section>
       </aside>
@@ -132,6 +160,6 @@
     <script src="data/avidin-biotin.js?v=2"></script>
     <script src="data/lactoferrin-iron.js?v=1"></script>
     <script src="data/estrogen-raloxifene.js?v=1"></script>
-    <script src="app.js?v=7"></script>
+    <script src="app.js?v=8"></script>
   </body>
 </html>

@@ -11,6 +11,13 @@
 
   const ELEMENT_COLORS = { C: "0xf3b23c", N: "0x4f8dff", O: "0xff5a4f", S: "0xffe14d", P: "0xff9a3c", CL: "0x5fe36a", FE: "0xd9662b" };
   const METAL_COLOR = "0xffa94d";
+  const CPU_COLOR = "0xb18cff";
+  // コンピュータの強さ。rate: 1 秒あたりの探索ステップ数、trialSteps: 1 回の試行の長さ、seconds: 持ち時間
+  const CPU_LEVELS = {
+    weak: { label: "よわい", rate: 150, trialSteps: 1500, seconds: 45 },
+    normal: { label: "ふつう", rate: 400, trialSteps: 2000, seconds: 60 },
+    strong: { label: "つよい", rate: 840, trialSteps: 2400, seconds: 60 },
+  };
   const HBOND_COLOR = "0x52d185";
   const HBOND_SHOW_MIN = 0.2; // これより弱い水素結合は線を描かない
   const CLASH_SHOW_MIN = 0.08; // これより小さい重なり（Å）は表示しない
@@ -48,6 +55,10 @@
     wasClashing: false,
     torsionMarkers: [],
     clashPoints: [],
+    assisted: false, // おたすけ機能を使ったか（使った回は自己ベストに記録しない）
+    refineHandle: null,
+    cpu: null, // コンピュータの探索の状態
+    cpuLevel: "weak",
     markerLoop: null,
   };
 
@@ -332,6 +343,9 @@
     state.lastMetalCount = 0;
     state.wasClashing = false;
     state.userDriven = false;
+    state.assisted = false;
+    stopRefine();
+    clearCpu();
     $("result").hidden = true;
     stopTimer();
     state.elapsed = 0;
@@ -366,6 +380,10 @@
     viewer.removeAllShapes();
 
     if (state.showAnswer) drawMolecule(tpl.crystal, tpl.bonds, { color: "0x3ddc84", alpha: 0.55, scale: 0.85 });
+    if (state.cpu) {
+      const cpuPose = state.cpu.running ? state.cpu.pose : state.cpu.best.pose;
+      if (cpuPose) drawMolecule(S.placeLigand(tpl, cpuPose), tpl.bonds, { color: CPU_COLOR, alpha: 0.6, scale: 0.9 });
+    }
     drawMolecule(placed, tpl.bonds, { highlightTorsion: state.activeTorsion, markTorsions: state.level === "flex" });
 
     // 水素結合（緑の点線）
@@ -618,6 +636,7 @@
       state.judged = false;
       $("result").hidden = true;
     }
+    stopRefine();
     startTimer();
     state.userDriven = true;
     requestDraw();
@@ -631,6 +650,14 @@
     $("judgeButton").addEventListener("click", judge);
     $("surfaceButton").addEventListener("click", toggleSurface);
     $("soundButton").addEventListener("click", toggleSound);
+    $("assistNear").addEventListener("click", assistNear);
+    $("assistRefine").addEventListener("click", assistRefine);
+    $("assistAnswer").addEventListener("click", assistAnswer);
+    $("cpuButton").addEventListener("click", toggleCpu);
+    document.querySelectorAll(".cpu-level").forEach((b) => b.addEventListener("click", () => {
+      state.cpuLevel = b.dataset.level;
+      document.querySelectorAll(".cpu-level").forEach((x) => x.classList.toggle("active", x === b));
+    }));
     // 最初の操作で音を出せる状態にする
     ["pointerdown", "keydown", "touchend"].forEach((t) => window.addEventListener(t, () => sound.unlock(), { capture: true, passive: true }));
 
@@ -868,6 +895,208 @@
     });
   }
 
+  // ---------- 探索（おたすけの微調整と、コンピュータの対戦相手で共通） ----------
+
+  function gauss() {
+    return Math.sqrt(-2 * Math.log(Math.random() + 1e-12)) * Math.cos(2 * Math.PI * Math.random());
+  }
+
+  // ポーズを少しだけランダムに動かす。scale が大きいほど大きく動く
+  function perturbPose(pose, scale, flexible) {
+    return {
+      R: S.matMul(S.axisAngleMatrix(gauss(), gauss(), gauss(), gauss() * 0.25 * scale), pose.R),
+      t: { x: pose.t.x + gauss() * 0.6 * scale, y: pose.t.y + gauss() * 0.6 * scale, z: pose.t.z + gauss() * 0.6 * scale },
+      torsions: pose.torsions.map((a) => (flexible && Math.random() < 0.4 ? a + gauss() * 0.5 * scale : a)),
+    };
+  }
+
+  function rawScore(pose) {
+    return S.scorePose(state.grid, S.placeLigand(state.template, pose), state.template).raw;
+  }
+
+  // ---------- おたすけ ----------
+
+  function markAssisted() {
+    state.assisted = true;
+    if (state.judged) { state.judged = false; $("result").hidden = true; }
+    startTimer();
+  }
+
+  // 答えの近く（入口側に少し離れ、向きも少しずれた場所）へ運ぶ
+  function assistNear() {
+    stopRefine();
+    markAssisted();
+    const out = pocketOutward();
+    const c = state.template.center;
+    const tilt = S.axisAngleMatrix(gauss(), gauss(), gauss(), 0.6);
+    state.pose.R = tilt;
+    state.pose.t = { x: c.x + out.x * 3.5, y: c.y + out.y * 3.5, z: c.z + out.z * 3.5 };
+    state.userDriven = true;
+    requestDraw();
+  }
+
+  // 答えの場所へ運ぶ
+  function assistAnswer() {
+    stopRefine();
+    markAssisted();
+    state.pose = S.crystalPose(state.template);
+    syncTorsionControls();
+    state.userDriven = true;
+    requestDraw();
+  }
+
+  // 今の場所から、点数が上がる方向へ少しずつ自動で動かす（山登り）
+  function assistRefine() {
+    stopRefine();
+    markAssisted();
+    const flexible = state.level === "flex";
+    let current = rawScore(state.pose);
+    let frame = 0;
+    const frames = 60;
+    const button = $("assistRefine");
+    button.classList.add("busy");
+    const tick = () => {
+      const scale = 0.3 * (1 - frame / frames) + 0.04;
+      for (let i = 0; i < 30; i++) {
+        const candidate = perturbPose(state.pose, scale, flexible);
+        const sc = rawScore(candidate);
+        if (sc > current) { state.pose = candidate; current = sc; }
+      }
+      state.userDriven = true;
+      requestDraw();
+      frame++;
+      if (frame < frames) state.refineHandle = requestAnimationFrame(tick);
+      else { state.refineHandle = null; button.classList.remove("busy"); syncTorsionControls(); }
+    };
+    state.refineHandle = requestAnimationFrame(tick);
+  }
+
+  function stopRefine() {
+    if (state.refineHandle) cancelAnimationFrame(state.refineHandle);
+    state.refineHandle = null;
+    $("assistRefine").classList.remove("busy");
+  }
+
+  // ---------- コンピュータと対決 ----------
+  // コンピュータは、ポケットのあたりにランダムに分子を置いては、少し動かして点数が上がれば採用する、
+  // という試行（焼きなまし法）を時間いっぱい繰り返す。実際のドッキング計算と同じ考え方。
+
+  function toggleCpu() {
+    if (state.cpu && state.cpu.running) { finishCpu(); return; }
+    startCpu();
+  }
+
+  function startCpu() {
+    clearCpu();
+    const config = CPU_LEVELS[state.cpuLevel];
+    state.cpu = {
+      running: true,
+      config,
+      flexible: state.level === "flex",
+      endAt: Date.now() + config.seconds * 1000,
+      lastTick: Date.now(),
+      debt: 0,
+      trial: 0,
+      step: config.trialSteps,
+      pose: null,
+      current: -Infinity,
+      best: { pose: null, score: -Infinity },
+      handle: null,
+    };
+    $("cpuButton").textContent = "コンピュータを止める";
+    $("cpuChip").hidden = false;
+    startTimer();
+    state.cpu.handle = requestAnimationFrame(cpuTick);
+  }
+
+  function cpuNewTrial(cpu) {
+    const tpl = state.template;
+    cpu.trial++;
+    cpu.step = 0;
+    cpu.pose = {
+      R: S.axisAngleMatrix(gauss(), gauss(), gauss(), Math.random() * Math.PI * 2),
+      t: { x: tpl.center.x + gauss() * 4, y: tpl.center.y + gauss() * 4, z: tpl.center.z + gauss() * 4 },
+      torsions: tpl.torsions.map(() => (cpu.flexible ? (Math.random() - 0.5) * Math.PI * 2 : 0)),
+    };
+    cpu.current = rawScore(cpu.pose);
+  }
+
+  function cpuTick() {
+    const cpu = state.cpu;
+    if (!cpu || !cpu.running) return;
+    // 画面の更新速度に関係なく、1 秒あたりのステップ数を一定にする
+    const now = Date.now();
+    cpu.debt += (Math.min(now - cpu.lastTick, 250) / 1000) * cpu.config.rate;
+    cpu.lastTick = now;
+    const steps = Math.min(200, Math.floor(cpu.debt));
+    cpu.debt -= steps;
+    for (let i = 0; i < steps; i++) {
+      if (cpu.step >= cpu.config.trialSteps) cpuNewTrial(cpu);
+      const progress = cpu.step / cpu.config.trialSteps;
+      const temperature = 1.5 * (1 - progress) + 0.02;
+      const candidate = perturbPose(cpu.pose, 0.3 + 1.2 * (1 - progress), cpu.flexible);
+      const sc = rawScore(candidate);
+      if (sc > cpu.current || Math.random() < Math.exp((sc - cpu.current) / temperature)) {
+        cpu.pose = candidate;
+        cpu.current = sc;
+        if (sc > cpu.best.score) cpu.best = { pose: clonePose(candidate), score: sc };
+      }
+      cpu.step++;
+    }
+    const left = Math.max(0, Math.ceil((cpu.endAt - Date.now()) / 1000));
+    updateCpuStatus(`試行 ${cpu.trial} 回目・残り ${left} 秒`);
+    requestDraw();
+    if (Date.now() >= cpu.endAt) finishCpu();
+    else cpu.handle = requestAnimationFrame(cpuTick);
+  }
+
+  function updateCpuStatus(text) {
+    const cpu = state.cpu;
+    const points = cpu && cpu.best.pose ? toPoints(cpu.best.score) : 0;
+    $("cpuScore").textContent = String(points);
+    $("cpuStatus").textContent = text;
+  }
+
+  function finishCpu() {
+    const cpu = state.cpu;
+    if (!cpu) return;
+    cpu.running = false;
+    if (cpu.handle) cancelAnimationFrame(cpu.handle);
+    $("cpuButton").textContent = "もう一度対決する";
+    if (cpu.best.pose) {
+      const rmsd = S.rmsdToCrystal(state.template, S.placeLigand(state.template, cpu.best.pose));
+      cpu.rmsd = rmsd;
+      updateCpuStatus(`探索終了（${cpu.trial} 回試行）。紫色の分子がコンピュータの答えです。「答え合わせ」で勝負！`);
+    } else {
+      updateCpuStatus("探索を止めました。");
+    }
+    requestDraw();
+  }
+
+  function clearCpu() {
+    if (state.cpu && state.cpu.handle) cancelAnimationFrame(state.cpu.handle);
+    state.cpu = null;
+    $("cpuButton").textContent = "コンピュータと対決する";
+    $("cpuChip").hidden = true;
+    $("cpuStatus").textContent = "";
+    $("resultCpu").hidden = true;
+  }
+
+  function showCpuResult(playerPoints) {
+    const box = $("resultCpu");
+    const cpu = state.cpu;
+    if (!cpu || !cpu.best.pose) { box.hidden = true; return; }
+    if (cpu.running) finishCpu();
+    const cpuPoints = toPoints(cpu.best.score);
+    const cpuRmsd = S.rmsdToCrystal(state.template, S.placeLigand(state.template, cpu.best.pose));
+    let verdict;
+    if (playerPoints > cpuPoints) verdict = "あなたの勝ち！";
+    else if (playerPoints < cpuPoints) verdict = "コンピュータの勝ち";
+    else verdict = "引き分け";
+    box.hidden = false;
+    $("resultCpuText").textContent = `${verdict}（コンピュータ「${cpu.config.label}」: ${cpuPoints} 点、ずれ ${cpuRmsd.toFixed(1)} Å）`;
+  }
+
   // ---------- 答え合わせ ----------
 
   function judge() {
@@ -904,7 +1133,9 @@
     $("resultRmsd").textContent = rmsd.toFixed(1) + " Å";
     $("resultTime").textContent = formatTime(state.elapsed);
     $("resultNote").textContent = note;
-    saveBest(points, rmsd, state.elapsed);
+    $("resultAssist").hidden = !state.assisted;
+    showCpuResult(points);
+    if (!state.assisted) saveBest(points, rmsd, state.elapsed);
     requestDraw();
     box.scrollIntoView({ block: "nearest", behavior: "smooth" });
   }
