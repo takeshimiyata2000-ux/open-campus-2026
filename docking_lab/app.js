@@ -412,15 +412,15 @@
       const l = placed[c.li];
       if (!clashAtoms.has(c.li)) {
         clashAtoms.add(c.li);
-        viewer.addSphere({ center: { x: l.x, y: l.y, z: l.z }, radius: 0.9, color: "0xff5040", alpha: 0.85 });
+        viewer.addSphere({ center: { x: l.x, y: l.y, z: l.z }, radius: 0.7, color: "0xff5040", alpha: 0.5 });
       }
       if (!clashProtein.has(c.p.index)) {
         clashProtein.add(c.p.index);
-        viewer.addSphere({ center: { x: c.p.x, y: c.p.y, z: c.p.z }, radius: 0.8, color: "0xff5040", alpha: 0.85 });
+        viewer.addSphere({ center: { x: c.p.x, y: c.p.y, z: c.p.z }, radius: 0.62, color: "0xff5040", alpha: 0.5 });
       }
       viewer.addCylinder({
         start: { x: l.x, y: l.y, z: l.z }, end: { x: c.p.x, y: c.p.y, z: c.p.z },
-        radius: 0.16, color: "0xff2d20", fromCap: 1, toCap: 1,
+        radius: 0.09, color: "0xff5040", alpha: 0.7, fromCap: 1, toCap: 1,
       });
     }
     // 画面上の目印（タンパク質の陰に隠れていても見える）は、重なりの大きい順に 4 か所まで
@@ -684,6 +684,7 @@
       pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
       try { layer.setPointerCapture(event.pointerId); } catch (e) { /* 無視 */ }
       gesture = null;
+      viewerEl.parentElement.classList.add("dragging-ligand");
     };
 
     const release = (event) => {
@@ -692,6 +693,7 @@
         if (layer.hasPointerCapture && layer.hasPointerCapture(event.pointerId)) layer.releasePointerCapture(event.pointerId);
       } catch (e) { /* 無視 */ }
       gesture = null;
+      if (!pointers.size) viewerEl.parentElement.classList.remove("dragging-ligand");
     };
 
     layer.addEventListener("pointerdown", (event) => { event.preventDefault(); track(event); });
