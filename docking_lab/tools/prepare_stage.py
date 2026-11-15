@@ -182,4 +182,5 @@ def main():
     for a in lig: print(" ", a["name"], a["el"], a["flags"])
     for t in tors: print("  torsion", lig[t["a"]]["name"], "-", lig[t["b"]]["name"], "moves", [lig[k]["name"] for k in t["moving"]])
 
-main()
+if __name__ == "__main__":
+    main()

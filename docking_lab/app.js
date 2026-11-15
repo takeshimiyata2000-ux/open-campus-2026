@@ -62,6 +62,14 @@
     cpuViewerStage: null,
     cpuViewKey: null,
     cpuLevel: "weak",
+    appMode: "manual", // manual: 手動ドッキング、screen: スクリーニング
+    screen: null,
+    candidate: null,
+    candidates: [],
+    prediction: null,
+    autoJob: null,
+    stageTemplate: null,
+    pocketCenter: null,
     markerLoop: null,
   };
 
@@ -177,6 +185,7 @@
     buildStageButtons();
     bindEvents();
     setMode("view");
+    $("tabScreen").hidden = !(window.DOCKING_SCREENS || []).length;
     loadStage(0);
     startTorsionMarkers();
   }
@@ -208,7 +217,13 @@
     state.protein = S.parsePdbAtoms(stage.proteinPdb, stage.proteinFlags);
     state.grid = S.buildGrid(state.protein);
     state.template = S.makeTemplate(stage.ligand);
+    state.template.hasAnswer = true;
     S.calibrateClash(state.grid, state.template);
+    state.currentPlaced = null;
+    state.currentScore = null;
+    state.stageTemplate = state.template; // 結晶構造のリガンド（ポケットの位置と 100 点の基準）
+    state.pocketCenter = state.template.center;
+    state.candidate = null;
     state.hasMetal = stage.ligand.atoms.some((a) => a.flags & S.FLAG.METAL);
     state.successRmsd = stage.successRmsd || DEFAULT_SUCCESS_RMSD;
 
@@ -256,7 +271,7 @@
 
   function pocketResidues(cutoff) {
     const result = new Map();
-    const crystal = state.template.crystal;
+    const crystal = state.stageTemplate.crystal;
     for (const p of state.protein) {
       for (const l of crystal) {
         if (Math.hypot(p.x - l.x, p.y - l.y, p.z - l.z) < cutoff) {
@@ -272,7 +287,7 @@
   // ポケットの入口方向（タンパク質の中心から結合部位へ向かう向き）
   function pocketOutward() {
     const c = S.centroid(state.protein);
-    const l = state.template.center;
+    const l = state.pocketCenter;
     const v = { x: l.x - c.x, y: l.y - c.y, z: l.z - c.z };
     const len = Math.hypot(v.x, v.y, v.z) || 1;
     return { x: v.x / len, y: v.y / len, z: v.z / len };
@@ -322,9 +337,9 @@
       pose = {
         R: R.slice(),
         t: {
-          x: tpl.center.x + out.x * distance + side.x * lateral,
-          y: tpl.center.y + out.y * distance + side.y * lateral,
-          z: tpl.center.z + out.z * distance + side.z * lateral,
+          x: state.pocketCenter.x + out.x * distance + side.x * lateral,
+          y: state.pocketCenter.y + out.y * distance + side.y * lateral,
+          z: state.pocketCenter.z + out.z * distance + side.z * lateral,
         },
         torsions: torsions.slice(),
       };
@@ -349,6 +364,7 @@
     state.assisted = false;
     stopRefine();
     clearCpu();
+    stopAutoDock();
     $("result").hidden = true;
     stopTimer();
     state.elapsed = 0;
@@ -382,7 +398,7 @@
 
     viewer.removeAllShapes();
 
-    if (state.showAnswer) drawMolecule(viewer, tpl.crystal, tpl.bonds, { color: "0x3ddc84", alpha: 0.55, scale: 0.85 });
+    if (state.showAnswer && tpl.hasAnswer) drawMolecule(viewer, tpl.crystal, tpl.bonds, { color: "0x3ddc84", alpha: 0.55, scale: 0.85 });
     drawMolecule(viewer, placed, tpl.bonds, { highlightTorsion: state.activeTorsion, markTorsions: state.level === "flex" });
 
     // 水素結合（緑の点線）
@@ -453,6 +469,11 @@
     updatePanel(score, shown.length, clashAtoms.size > 0 || score.intraClash > 0.3, metalShown.length);
     state.currentScore = score;
     state.currentPlaced = placed;
+    if (state.candidate && score.raw > state.candidate.bestRaw) {
+      state.candidate.bestRaw = score.raw;
+      state.candidate.bestPose = clonePose(state.pose);
+      updateCandidateCard(state.candidate);
+    }
     if (state.cpu && !state.cpu.running) drawCpu();
   }
 
@@ -636,6 +657,7 @@
       $("result").hidden = true;
     }
     stopRefine();
+    if (state.autoJob) return; // 自動ドッキング中は手動操作を受け付けない
     startTimer();
     state.userDriven = true;
     requestDraw();
@@ -653,6 +675,11 @@
     $("assistRefine").addEventListener("click", assistRefine);
     $("assistAnswer").addEventListener("click", assistAnswer);
     $("cpuButton").addEventListener("click", toggleCpu);
+    $("tabManual").addEventListener("click", () => { if (state.appMode !== "manual") setAppMode("manual"); });
+    $("tabScreen").addEventListener("click", () => { if (state.appMode !== "screen") setAppMode("screen"); });
+    $("autoOne").addEventListener("click", () => { if (state.candidate) autoDock(state.candidates.indexOf(state.candidate)); });
+    $("autoAll").addEventListener("click", autoDockAll);
+    $("showScreenResult").addEventListener("click", showScreenResult);
     document.querySelectorAll(".cpu-level").forEach((b) => b.addEventListener("click", () => {
       state.cpuLevel = b.dataset.level;
       document.querySelectorAll(".cpu-level").forEach((x) => x.classList.toggle("active", x === b));
@@ -931,7 +958,7 @@
     stopRefine();
     markAssisted();
     const out = pocketOutward();
-    const c = state.template.center;
+    const c = state.pocketCenter;
     const tilt = S.axisAngleMatrix(gauss(), gauss(), gauss(), 0.6);
     state.pose.R = tilt;
     state.pose.t = { x: c.x + out.x * 3.5, y: c.y + out.y * 3.5, z: c.z + out.z * 3.5 };
@@ -1087,7 +1114,7 @@
     cpu.step = 0;
     cpu.pose = {
       R: S.axisAngleMatrix(gauss(), gauss(), gauss(), Math.random() * Math.PI * 2),
-      t: { x: tpl.center.x + gauss() * 4, y: tpl.center.y + gauss() * 4, z: tpl.center.z + gauss() * 4 },
+      t: { x: state.pocketCenter.x + gauss() * 4, y: state.pocketCenter.y + gauss() * 4, z: state.pocketCenter.z + gauss() * 4 },
       torsions: tpl.torsions.map(() => (cpu.flexible ? (Math.random() - 0.5) * Math.PI * 2 : 0)),
     };
     cpu.current = rawScore(cpu.pose);
@@ -1174,6 +1201,215 @@
     else verdict = "引き分け";
     box.hidden = false;
     $("resultCpuText").textContent = `${verdict}（コンピュータ「${cpu.config.label}」: ${cpuPoints} 点、ずれ ${cpuRmsd.toFixed(1)} Å）`;
+  }
+
+  // ---------- スクリーニング（候補の中から、本物の相手を探す） ----------
+
+  // 自動ドッキングの設定。trials: 試行数、steps: 1 試行のステップ数、frameMs: 1 フレームで計算に使う時間
+  const autoConfig = { trials: 40, steps: 3000, frameMs: 12 };
+
+  function setAppMode(mode) {
+    if (mode === "screen" && !(window.DOCKING_SCREENS || []).length) return;
+    state.appMode = mode;
+    document.body.classList.toggle("mode-screen", mode === "screen");
+    $("tabManual").classList.toggle("active", mode === "manual");
+    $("tabScreen").classList.toggle("active", mode === "screen");
+    if (mode === "screen") {
+      startScreen(window.DOCKING_SCREENS[0]);
+    } else {
+      stopAutoDock();
+      state.screen = null;
+      loadStage(Math.max(0, state.stageIndex));
+    }
+  }
+
+  function startScreen(screen) {
+    const stageIndex = state.stages.findIndex((s) => s.id === screen.stageId);
+    loadStage(stageIndex);
+    state.screen = screen;
+    state.prediction = null;
+    state.candidates = screen.candidates.map((c) => {
+      const template = S.makeTemplate(c.ligand);
+      template.hasAnswer = false;
+      return { data: c, template, bestRaw: -Infinity, bestPose: null, docked: false };
+    });
+    $("stageTitle").textContent = screen.title;
+    $("screenQuestion").textContent = screen.question;
+    $("screenNote").textContent = screen.note || "";
+    $("screenResult").hidden = true;
+    buildCandidateCards();
+    selectCandidate(0);
+  }
+
+  function buildCandidateCards() {
+    const list = $("candidateList");
+    list.innerHTML = "";
+    state.candidates.forEach((cand, index) => {
+      const card = document.createElement("div");
+      card.className = "candidate";
+      card.innerHTML =
+        `<button type="button" class="cand-main"><span class="cand-name"></span><span class="cand-desc"></span></button>` +
+        `<span class="cand-score">—</span>` +
+        `<label class="cand-predict"><input type="radio" name="prediction"> 予想</label>`;
+      card.querySelector(".cand-name").textContent = cand.data.name;
+      card.querySelector(".cand-desc").textContent = cand.data.desc;
+      card.querySelector(".cand-main").addEventListener("click", () => selectCandidate(index));
+      card.querySelector("input").addEventListener("change", () => { state.prediction = cand.data.id; updateScreenButtons(); });
+      cand.card = card;
+      list.appendChild(card);
+    });
+    updateScreenButtons();
+  }
+
+  function selectCandidate(index) {
+    stopAutoDock();
+    const cand = state.candidates[index];
+    state.candidate = null; // 切り替え中の描画で、前の候補の記録を書き換えないようにする
+    state.currentPlaced = null; // 前の分子の座標を、目印の表示に使わないようにする
+    state.currentScore = null;
+    state.template = cand.template;
+    state.level = cand.template.torsions.length ? "flex" : "rigid";
+    $("torsionSection").hidden = state.level !== "flex";
+    state.activeTorsion = -1;
+    buildTorsionControls();
+    buildTorsionMarkers();
+    resetPose();
+    if (cand.bestPose) { state.pose = clonePose(cand.bestPose); syncTorsionControls(); }
+    state.candidate = cand;
+    state.candidates.forEach((c) => c.card.classList.toggle("active", c === cand));
+    requestDraw();
+  }
+
+  function updateCandidateCard(cand) {
+    if (!cand.card) return;
+    const points = cand.bestRaw > -Infinity ? toPoints(cand.bestRaw) : null;
+    cand.card.querySelector(".cand-score").textContent = points == null ? "—" : points + " 点";
+    cand.card.classList.toggle("docked", cand.docked);
+  }
+
+  function updateScreenButtons() {
+    const busy = !!state.autoJob;
+    const allDocked = state.candidates.length > 0 && state.candidates.every((c) => c.docked);
+    $("autoOne").disabled = busy;
+    $("autoAll").disabled = busy;
+    $("showScreenResult").disabled = busy || !allDocked || !state.prediction;
+    let hint = "";
+    if (!state.prediction) hint = "まず、いちばん強く結合すると思う分子の「予想」を選んでください。";
+    else if (!allDocked) hint = "すべての候補を自動ドッキングすると、結果を見られます。自分の手で動かして試すこともできます。";
+    $("screenHint").textContent = busy ? "" : hint;
+  }
+
+  // 候補 1 つを自動ドッキングする。終わったら done を呼ぶ
+  function autoDock(index, done) {
+    selectCandidate(index);
+    const cand = state.candidates[index];
+    const tpl = cand.template;
+    const job = { cand, trial: 0, step: autoConfig.steps, pose: null, current: -Infinity, best: { pose: null, score: -Infinity }, handle: null, done };
+    state.autoJob = job;
+    updateScreenButtons();
+    cand.card.classList.add("busy");
+    const tick = () => {
+      const t0 = performance.now();
+      let finished = false;
+      while (performance.now() - t0 < autoConfig.frameMs) {
+        if (job.step >= autoConfig.steps) {
+          if (job.trial >= autoConfig.trials) { finished = true; break; }
+          job.trial++;
+          job.step = 0;
+          job.pose = {
+            R: S.axisAngleMatrix(gauss(), gauss(), gauss(), Math.random() * Math.PI * 2),
+            t: { x: state.pocketCenter.x + gauss() * 4, y: state.pocketCenter.y + gauss() * 4, z: state.pocketCenter.z + gauss() * 4 },
+            torsions: tpl.torsions.map(() => (Math.random() - 0.5) * Math.PI * 2),
+          };
+          job.current = rawScore(job.pose);
+        }
+        const progress = job.step / autoConfig.steps;
+        const candidate = perturbPose(job.pose, 0.3 + 1.2 * (1 - progress), true);
+        const sc = rawScore(candidate);
+        if (sc > job.current || Math.random() < Math.exp((sc - job.current) / (1.5 * (1 - progress) + 0.02))) {
+          job.pose = candidate;
+          job.current = sc;
+          if (sc > job.best.score) job.best = { pose: clonePose(candidate), score: sc };
+        }
+        job.step++;
+      }
+      if (finished) {
+        state.autoJob = null;
+        cand.card.classList.remove("busy");
+        cand.docked = true;
+        if (job.best.pose) {
+          state.pose = clonePose(job.best.pose);
+          if (job.best.score > cand.bestRaw) { cand.bestRaw = job.best.score; cand.bestPose = clonePose(job.best.pose); }
+        }
+        syncTorsionControls();
+        $("screenProgress").textContent = "";
+        requestDraw();
+        updateCandidateCard(cand);
+        updateScreenButtons();
+        if (job.done) job.done();
+        return;
+      }
+      state.pose = clonePose(job.pose);
+      $("screenProgress").textContent = `${cand.data.name} を自動ドッキング中…（${Math.min(job.trial, autoConfig.trials)} / ${autoConfig.trials} 回目の試行）`;
+      requestDraw();
+      job.handle = requestAnimationFrame(tick);
+    };
+    job.handle = requestAnimationFrame(tick);
+  }
+
+  function autoDockAll() {
+    const next = (i) => {
+      if (i >= state.candidates.length) return;
+      if (state.candidates[i].docked) { next(i + 1); return; }
+      autoDock(i, () => next(i + 1));
+    };
+    next(0);
+  }
+
+  function stopAutoDock() {
+    const job = state.autoJob;
+    if (!job) return;
+    if (job.handle) cancelAnimationFrame(job.handle);
+    job.cand.card.classList.remove("busy");
+    state.autoJob = null;
+    $("screenProgress").textContent = "";
+    updateScreenButtons();
+  }
+
+  function showScreenResult() {
+    const screen = state.screen;
+    const ranked = state.candidates.slice().sort((a, b) => b.bestRaw - a.bestRaw);
+    const answer = state.candidates.find((c) => c.data.id === screen.answerId);
+    const predicted = state.candidates.find((c) => c.data.id === state.prediction);
+    const correct = predicted === answer;
+    const list = $("screenRanking");
+    list.innerHTML = "";
+    ranked.forEach((cand, i) => {
+      const points = toPoints(cand.bestRaw);
+      const row = document.createElement("li");
+      row.className = "rank-row truth-" + cand.data.truth;
+      row.innerHTML =
+        `<div class="rank-head"><span class="rank-no"></span><span class="rank-name"></span><b class="rank-points"></b></div>` +
+        `<div class="bar"><i></i></div>` +
+        `<div class="rank-truth"></div><p class="rank-lesson"></p>`;
+      row.querySelector(".rank-no").textContent = i + 1 + " 位";
+      row.querySelector(".rank-name").textContent = cand.data.name + (cand === predicted ? "（あなたの予想）" : "");
+      row.querySelector(".rank-points").textContent = points + " 点";
+      row.querySelector("i").style.width = points + "%";
+      row.querySelector(".rank-truth").textContent = "実際の結合: " + cand.data.truthLabel;
+      row.querySelector(".rank-lesson").textContent = cand.data.lesson;
+      list.appendChild(row);
+    });
+    $("screenVerdict").textContent = correct
+      ? `正解！本物の相手は「${answer.data.name}」です。`
+      : `残念。本物の相手は「${answer.data.name}」でした。`;
+    $("screenCaveat").textContent = ranked[0] === answer ? ""
+      : `今回の計算では「${ranked[0].data.name}」が 1 位になりました。計算の順位と実際の結合の強さは、いつも一致するとは限りません。`;
+    $("screenResult").classList.toggle("success", correct);
+    $("screenResult").hidden = false;
+    sound.unlock();
+    sound.judge(correct ? "success" : "far");
+    $("screenResult").scrollIntoView({ block: "nearest", behavior: "smooth" });
   }
 
   // ---------- 答え合わせ ----------
@@ -1289,7 +1525,7 @@
   }
 
   // 動作確認用に内部状態を公開する
-  window.__dockingLab = { state, S, draw, judge, setMode, setLevel, sound, loadStage };
+  window.__dockingLab = { state, S, draw, judge, setMode, setLevel, sound, loadStage, setAppMode, autoConfig };
 
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", init);
   else init();

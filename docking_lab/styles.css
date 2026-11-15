@@ -388,3 +388,55 @@ button:disabled { opacity: 0.4; cursor: not-allowed; }
   .viewer-wrap.split .player-tag { bottom: calc(50% + 10px); }
   .cpu-best strong { font-size: 22px; }
 }
+
+/* 遊び方の切り替え */
+.tabs { display: flex; gap: 0; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+.tab { border: 0; border-radius: 0; padding: 8px 12px; font-size: 13px; background: transparent; white-space: nowrap; }
+.tab.active { background: var(--text); color: #101113; font-weight: 700; }
+.screen-only { display: none; }
+body.mode-screen .screen-only { display: block; }
+body.mode-screen .manual-only { display: none !important; }
+
+/* スクリーニング */
+.candidates { display: grid; gap: 6px; margin: 10px 0; }
+.candidate {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  grid-template-areas: "main score" "main predict";
+  align-items: center;
+  gap: 2px 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel-2);
+  padding: 4px 10px 4px 4px;
+}
+.candidate.active { border-color: var(--accent); box-shadow: inset 3px 0 0 var(--accent); }
+.candidate.busy { border-color: #49c6e5; }
+.cand-main { grid-area: main; display: grid; gap: 2px; text-align: left; border: 0; background: transparent; padding: 6px 8px; }
+.cand-name { font-weight: 700; }
+.cand-desc { font-size: 11px; color: var(--muted); line-height: 1.4; }
+.cand-score { grid-area: score; text-align: right; font-weight: 700; font-variant-numeric: tabular-nums; color: var(--muted); }
+.candidate.docked .cand-score { color: var(--accent); }
+.cand-predict { grid-area: predict; font-size: 11px; color: var(--muted); display: flex; align-items: center; gap: 4px; justify-content: flex-end; cursor: pointer; }
+.cand-predict input { accent-color: var(--accent); }
+.screen-progress { color: #49c6e5; min-height: 1.2em; }
+#showScreenResult { margin-top: 8px; }
+.ranking { display: grid; gap: 10px; margin: 10px 0 0; padding: 0; list-style: none; }
+.rank-row { display: grid; gap: 4px; font-size: 12px; }
+.rank-head { display: flex; gap: 8px; align-items: baseline; }
+.rank-no { color: var(--muted); flex-shrink: 0; }
+.rank-name { font-weight: 700; flex: 1; }
+.rank-points { font-variant-numeric: tabular-nums; }
+.rank-row .bar { height: 8px; border-radius: 4px; background: #2e3237; overflow: hidden; }
+.rank-row .bar i { display: block; height: 100%; background: var(--muted); border-radius: 4px; }
+.rank-row.truth-3 .bar i { background: var(--good); }
+.rank-row.truth-2 .bar i { background: #9fd65a; }
+.rank-truth { font-weight: 600; }
+.rank-row.truth-3 .rank-truth { color: var(--good); }
+.rank-row.truth-2 .rank-truth { color: #9fd65a; }
+.rank-row.truth-1 .rank-truth, .rank-row.truth-0 .rank-truth { color: var(--muted); }
+.rank-lesson { color: var(--muted); line-height: 1.5; }
+@media (max-width: 760px) {
+  .topbar { flex-wrap: wrap; }
+  .tab { padding: 7px 9px; font-size: 12px; }
+}
