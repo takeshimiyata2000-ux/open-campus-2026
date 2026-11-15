@@ -404,7 +404,7 @@
       viewer.addSphere({ center: { x: h.p.x, y: h.p.y, z: h.p.z }, radius: 0.36, color: METAL_COLOR, alpha: 0.8 });
     }
 
-    // ぶつかっている原子の組（低分子側とタンパク質側の両方を赤い球で示し、赤い棒でつなぐ）
+    // ぶつかっている原子の組（低分子側とタンパク質側の両方を赤い球で示す）
     const clashPairs = score.clashes.filter((c) => c.overlap >= CLASH_SHOW_MIN).sort((a, b) => b.overlap - a.overlap);
     const clashAtoms = new Set();
     const clashProtein = new Set();
@@ -418,10 +418,6 @@
         clashProtein.add(c.p.index);
         viewer.addSphere({ center: { x: c.p.x, y: c.p.y, z: c.p.z }, radius: 0.62, color: "0xff5040", alpha: 0.5 });
       }
-      viewer.addCylinder({
-        start: { x: l.x, y: l.y, z: l.z }, end: { x: c.p.x, y: c.p.y, z: c.p.z },
-        radius: 0.09, color: "0xff5040", alpha: 0.7, fromCap: 1, toCap: 1,
-      });
     }
     // 画面上の目印（タンパク質の陰に隠れていても見える）は、重なりの大きい順に 4 か所まで
     state.clashPoints = clashPairs.slice(0, 4).map((c) => {
