@@ -58,6 +58,9 @@
     assisted: false, // おたすけ機能を使ったか（使った回は自己ベストに記録しない）
     refineHandle: null,
     cpu: null, // コンピュータの探索の状態
+    cpuViewer: null,
+    cpuViewerStage: null,
+    cpuViewKey: null,
     cpuLevel: "weak",
     markerLoop: null,
   };
@@ -379,12 +382,8 @@
 
     viewer.removeAllShapes();
 
-    if (state.showAnswer) drawMolecule(tpl.crystal, tpl.bonds, { color: "0x3ddc84", alpha: 0.55, scale: 0.85 });
-    if (state.cpu) {
-      const cpuPose = state.cpu.running ? state.cpu.pose : state.cpu.best.pose;
-      if (cpuPose) drawMolecule(S.placeLigand(tpl, cpuPose), tpl.bonds, { color: CPU_COLOR, alpha: 0.6, scale: 0.9 });
-    }
-    drawMolecule(placed, tpl.bonds, { highlightTorsion: state.activeTorsion, markTorsions: state.level === "flex" });
+    if (state.showAnswer) drawMolecule(viewer, tpl.crystal, tpl.bonds, { color: "0x3ddc84", alpha: 0.55, scale: 0.85 });
+    drawMolecule(viewer, placed, tpl.bonds, { highlightTorsion: state.activeTorsion, markTorsions: state.level === "flex" });
 
     // 水素結合（緑の点線）
     const shown = score.hbonds.filter((h) => h.strength >= HBOND_SHOW_MIN);
@@ -454,10 +453,10 @@
     updatePanel(score, shown.length, clashAtoms.size > 0 || score.intraClash > 0.3, metalShown.length);
     state.currentScore = score;
     state.currentPlaced = placed;
+    if (state.cpu && !state.cpu.running) drawCpu();
   }
 
-  function drawMolecule(atoms, bonds, opts) {
-    const viewer = state.viewer;
+  function drawMolecule(viewer, atoms, bonds, opts) {
     const alpha = opts.alpha == null ? 1 : opts.alpha;
     const scale = opts.scale || 1;
     const hl = opts.highlightTorsion >= 0 ? state.template.torsions[opts.highlightTorsion] : null;
@@ -481,7 +480,7 @@
       viewer.addSphere({
         center: { x: atom.x, y: atom.y, z: atom.z },
         radius: (atom.el === "FE" ? 0.8 : atom.el === "S" || atom.el === "CL" ? 0.55 : 0.45) * scale,
-        color: opts.color || ELEMENT_COLORS[atom.el] || "0xbec7d5",
+        color: opts.color || (atom.el === "C" && opts.carbonColor) || ELEMENT_COLORS[atom.el] || "0xbec7d5",
         alpha,
       });
     }
@@ -678,7 +677,11 @@
     }, { passive: false });
 
     bindPointerEvents();
-    window.addEventListener("resize", () => { state.viewer.resize(); requestDraw(); });
+    window.addEventListener("resize", () => {
+      state.viewer.resize();
+      if (state.cpuViewer && state.cpu) { state.cpuViewer.resize(); state.cpuViewer.render(); }
+      requestDraw();
+    });
   }
 
   // 押している間くり返すボタン
@@ -844,6 +847,7 @@
   // 分子の上に重ねる目印（ねじれる結合の番号、衝突の位置）を毎フレーム更新する
   function updateTorsionMarkers() {
     state.markerLoop = requestAnimationFrame(updateTorsionMarkers);
+    if (state.cpu && !state.cpu.running && syncCpuView()) state.cpuViewer.render();
     const viewer = state.viewer;
     if (!viewer || typeof viewer.modelToScreen !== "function" || !state.currentPlaced) return;
     const wrap = viewerEl.getBoundingClientRect();
@@ -981,6 +985,73 @@
   // コンピュータは、ポケットのあたりにランダムに分子を置いては、少し動かして点数が上がれば採用する、
   // という試行（焼きなまし法）を時間いっぱい繰り返す。実際のドッキング計算と同じ考え方。
 
+  // 対決中は画面を 2 分割し、右（スマホでは下）にコンピュータ専用の画面を出す
+  function openCpuPane() {
+    const wrap = viewerEl.parentElement;
+    wrap.classList.add("split");
+    state.viewer.resize();
+    if (!state.cpuViewer) {
+      state.cpuViewer = $3Dmol.createViewer($("cpuViewer"), { backgroundColor: "#0d0a14", antialias: true });
+    }
+    const cv = state.cpuViewer;
+    cv.resize();
+    if (state.cpuViewerStage !== state.stage.id) {
+      cv.removeAllModels();
+      cv.addModel(state.stage.proteinPdb, "pdb");
+      cv.setStyle({}, { cartoon: { color: "#7d8796", opacity: 0.8 } });
+      cv.addStyle(state.pocketSelection, { stick: { radius: 0.13, colorscheme: "whiteCarbon" } });
+      state.cpuViewerStage = state.stage.id;
+    }
+    syncCpuView();
+    requestDraw();
+  }
+
+  function closeCpuPane() {
+    const wrap = viewerEl.parentElement;
+    if (!wrap.classList.contains("split")) return;
+    wrap.classList.remove("split");
+    state.viewer.resize();
+    state.viewer.render();
+  }
+
+  // コンピュータ側の画面を、プレイヤー側と同じ向き・拡大率にそろえる
+  function syncCpuView() {
+    if (!state.cpuViewer || !state.cpu) return;
+    const view = state.viewer.getView();
+    const key = view.map((v) => v.toFixed(3)).join(",");
+    if (key === state.cpuViewKey) return false;
+    state.cpuViewKey = key;
+    state.cpuViewer.setView(view);
+    return true;
+  }
+
+  function drawCpu() {
+    const cv = state.cpuViewer;
+    const cpu = state.cpu;
+    if (!cv || !cpu) return;
+    const tpl = state.template;
+    cv.removeAllShapes();
+    if (state.showAnswer) drawMolecule(cv, tpl.crystal, tpl.bonds, { color: "0x3ddc84", alpha: 0.55, scale: 0.85 });
+    const pose = cpu.running ? cpu.pose : cpu.best.pose;
+    if (pose) {
+      const placed = S.placeLigand(tpl, pose);
+      drawMolecule(cv, placed, tpl.bonds, { carbonColor: CPU_COLOR });
+      const score = S.scorePose(state.grid, placed, tpl);
+      for (const [bonds, color] of [[score.hbonds, HBOND_COLOR], [score.metalBonds, METAL_COLOR]]) {
+        for (const h of bonds) {
+          if (h.strength < HBOND_SHOW_MIN) continue;
+          const l = placed[h.li];
+          cv.addCylinder({
+            start: { x: l.x, y: l.y, z: l.z }, end: { x: h.p.x, y: h.p.y, z: h.p.z },
+            radius: 0.06 + 0.05 * h.strength, color, dashed: true, dashLength: 0.28, gapLength: 0.18, fromCap: 1, toCap: 1,
+          });
+        }
+      }
+      $("cpuNow").textContent = String(toPoints(score.raw));
+    }
+    cv.render();
+  }
+
   function toggleCpu() {
     if (state.cpu && state.cpu.running) { finishCpu(); return; }
     startCpu();
@@ -1004,7 +1075,8 @@
       handle: null,
     };
     $("cpuButton").textContent = "コンピュータを止める";
-    $("cpuChip").hidden = false;
+    state.cpu.startedAt = Date.now();
+    openCpuPane();
     startTimer();
     state.cpu.handle = requestAnimationFrame(cpuTick);
   }
@@ -1045,8 +1117,11 @@
     }
     const left = Math.max(0, Math.ceil((cpu.endAt - Date.now()) / 1000));
     updateCpuStatus(`試行 ${cpu.trial} 回目・残り ${left} 秒`);
-    requestDraw();
-    if (Date.now() >= cpu.endAt) finishCpu();
+    syncCpuView();
+    drawCpu();
+    // 100 点の場所を見つけたら、そこで探索をやめる
+    if (cpu.best.pose && toPoints(cpu.best.score) >= 100) { cpu.found = true; finishCpu(); }
+    else if (Date.now() >= cpu.endAt) finishCpu();
     else cpu.handle = requestAnimationFrame(cpuTick);
   }
 
@@ -1066,18 +1141,22 @@
     if (cpu.best.pose) {
       const rmsd = S.rmsdToCrystal(state.template, S.placeLigand(state.template, cpu.best.pose));
       cpu.rmsd = rmsd;
-      updateCpuStatus(`探索終了（${cpu.trial} 回試行）。紫色の分子がコンピュータの答えです。「答え合わせ」で勝負！`);
+      const seconds = Math.max(1, Math.round((Date.now() - cpu.startedAt) / 1000));
+      updateCpuStatus(cpu.found
+        ? `${seconds} 秒、${cpu.trial} 回目の試行で 100 点の場所を見つけて、探索を終えました。「答え合わせ」で勝負！`
+        : `探索終了（${cpu.trial} 回試行）。右の画面がコンピュータの答えです。「答え合わせ」で勝負！`);
     } else {
       updateCpuStatus("探索を止めました。");
     }
-    requestDraw();
+    drawCpu();
   }
 
   function clearCpu() {
     if (state.cpu && state.cpu.handle) cancelAnimationFrame(state.cpu.handle);
     state.cpu = null;
+    state.cpuViewKey = null;
+    closeCpuPane();
     $("cpuButton").textContent = "コンピュータと対決する";
-    $("cpuChip").hidden = true;
     $("cpuStatus").textContent = "";
     $("resultCpu").hidden = true;
   }

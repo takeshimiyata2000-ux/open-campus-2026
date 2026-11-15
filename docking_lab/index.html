@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
     <title>ドッキングラボ（試作版）</title>
-    <link rel="stylesheet" href="styles.css?v=7">
+    <link rel="stylesheet" href="styles.css?v=8">
   </head>
   <body>
     <main class="app">
@@ -41,12 +41,18 @@
             <div class="hud-hbond hud-metal metal-only" hidden>
               <span class="dot"></span>配位結合 <strong id="liveMetal">0</strong> 本
             </div>
-            <div id="cpuChip" class="hud-hbond hud-cpu" hidden>
-              <span class="dot"></span>コンピュータ <strong id="cpuScore">0</strong> 点
-            </div>
             <div id="clashWarning" class="hud-clash" hidden>ぶつかっています</div>
           </div>
 
+          <div class="cpu-pane" aria-label="コンピュータの画面">
+            <div id="cpuViewer"></div>
+            <div class="cpu-hud">
+              <div class="cpu-title">コンピュータ</div>
+              <div class="cpu-best">最高 <strong id="cpuScore">0</strong> 点</div>
+              <div class="cpu-now">いま <span id="cpuNow">0</span> 点</div>
+            </div>
+          </div>
+          <div class="player-tag">あなた</div>
           <div class="timer">経過 <strong id="timer">0:00</strong></div>
           <div id="loading" class="loading">構造を読み込み中…</div>
         </div>
@@ -119,7 +125,7 @@
           </div>
           <button id="cpuButton" class="cpu" type="button">コンピュータと対決する</button>
           <p id="cpuStatus" class="help cpu-status"></p>
-          <p class="help">コンピュータは、ポケットのあたりで分子をランダムに動かし、点数が上がる置き方を 45〜60 秒間探します。強いほど、たくさん試します。実際のドッキング計算と同じ考え方です。紫色の分子がコンピュータです。</p>
+          <p class="help">コンピュータは、ポケットのあたりで分子をランダムに動かし、点数が上がる置き方を 45〜60 秒間探します。強いほど、たくさん試します。実際のドッキング計算と同じ考え方です。対決中は画面が 2 つに分かれ、紫色の分子がコンピュータです。100 点の場所を見つけると、そこで探索をやめます。</p>
         </section>
 
         <section>
@@ -160,6 +166,6 @@
     <script src="data/avidin-biotin.js?v=2"></script>
     <script src="data/lactoferrin-iron.js?v=1"></script>
     <script src="data/estrogen-raloxifene.js?v=1"></script>
-    <script src="app.js?v=8"></script>
+    <script src="app.js?v=9"></script>
   </body>
 </html>
