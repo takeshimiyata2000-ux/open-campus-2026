@@ -393,9 +393,10 @@ button:disabled { opacity: 0.4; cursor: not-allowed; }
 .tabs { display: flex; gap: 0; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
 .tab { border: 0; border-radius: 0; padding: 8px 12px; font-size: 13px; background: transparent; white-space: nowrap; }
 .tab.active { background: var(--text); color: #101113; font-weight: 700; }
-.screen-only { display: none; }
+.screen-only, .lab-only { display: none; }
 body.mode-screen .screen-only { display: block; }
-body.mode-screen .manual-only { display: none !important; }
+body.mode-lab .lab-only { display: block; }
+body.mode-screen .manual-only, body.mode-lab .manual-only { display: none !important; }
 
 /* スクリーニング */
 .candidates { display: grid; gap: 6px; margin: 10px 0; }
@@ -440,3 +441,23 @@ body.mode-screen .manual-only { display: none !important; }
   .topbar { flex-wrap: wrap; }
   .tab { padding: 7px 9px; font-size: 12px; }
 }
+
+/* 研究室ツール */
+.dropzone {
+  display: grid;
+  gap: 8px;
+  justify-items: start;
+  padding: 12px;
+  border: 1px dashed var(--line);
+  border-radius: 10px;
+  margin-top: 10px;
+}
+.dropzone.over { border-color: var(--accent); background: rgba(243, 178, 60, 0.08); }
+.dropzone .help { margin: 0; }
+.lab-error { color: var(--bad); font-size: 12px; margin-top: 8px; line-height: 1.5; }
+.lab-info { font-size: 12px; color: var(--muted); line-height: 1.6; margin-top: 10px; }
+.lab-info strong { color: var(--text); }
+.pocket-row { display: grid; gap: 2px; text-align: left; width: 100%; border: 0; background: transparent; padding: 8px; }
+.pocket-row .cand-desc { font-size: 11px; }
+#labRanking { margin-top: 10px; }
+#labRanking .rank-row .bar i { background: var(--accent); }

@@ -204,20 +204,24 @@
   }
 
   function loadStage(index) {
-    const stage = state.stages[index];
     state.stageIndex = index;
-    state.stage = stage;
     document.querySelectorAll(".stage").forEach((b, i) => b.classList.toggle("active", i === index));
+    applyStage(state.stages[index]);
+  }
+
+  // 組み込みのステージでも、研究室ツールで読み込んだ構造でも、ここから先は同じ扱いになる
+  function applyStage(stage) {
+    state.stage = stage;
     $("stageTitle").textContent = stage.title;
     $("stageBlurb").textContent = stage.blurb;
     $("proteinName").textContent = stage.proteinName;
     $("ligandName").textContent = stage.ligandName;
     $("pdbId").textContent = "PDB " + stage.pdbId;
 
-    state.protein = S.parsePdbAtoms(stage.proteinPdb, stage.proteinFlags);
+    state.protein = stage.proteinAtoms || S.parsePdbAtoms(stage.proteinPdb, stage.proteinFlags);
     state.grid = S.buildGrid(state.protein);
     state.template = S.makeTemplate(stage.ligand);
-    state.template.hasAnswer = true;
+    state.template.hasAnswer = stage.hasAnswer !== false;
     S.calibrateClash(state.grid, state.template);
     state.currentPlaced = null;
     state.currentScore = null;
@@ -254,8 +258,13 @@
     state.surface = null;
     $("surfaceButton").textContent = "表面を表示";
 
-    viewer.addModel(state.stage.proteinPdb, "pdb");
+    const stage = state.stage;
+    viewer.addModel(stage.structureText || stage.proteinPdb, stage.structureFormat || "pdb");
     viewer.setStyle({}, { cartoon: { color: "#7d8796", opacity: 0.8 } });
+    // 補因子や糖鎖など、タンパク質でない部分も細い棒で見えるようにする（水は除く）
+    viewer.addStyle({ hetflag: true, not: { resn: ["HOH", "DOD", "WAT"] } }, { stick: { radius: 0.11, colorscheme: "whiteCarbon" } });
+    // 選んだリガンドは、こちらで描くので構造側は隠す
+    if (stage.hideSelection) viewer.setStyle(stage.hideSelection, {});
 
     // 結合部位のまわりのアミノ酸だけ、棒で表示する
     const pocket = pocketResidues(7.0);
@@ -680,6 +689,8 @@
     $("autoOne").addEventListener("click", () => { if (state.candidate) autoDock(state.candidates.indexOf(state.candidate)); });
     $("autoAll").addEventListener("click", autoDockAll);
     $("showScreenResult").addEventListener("click", showScreenResult);
+    $("tabLab").addEventListener("click", () => { if (state.appMode !== "lab") setAppMode("lab"); });
+    bindLabEvents();
     document.querySelectorAll(".cpu-level").forEach((b) => b.addEventListener("click", () => {
       state.cpuLevel = b.dataset.level;
       document.querySelectorAll(".cpu-level").forEach((x) => x.classList.toggle("active", x === b));
@@ -968,6 +979,7 @@
 
   // 答えの場所へ運ぶ
   function assistAnswer() {
+    if (!state.template.hasAnswer) return;
     stopRefine();
     markAssisted();
     state.pose = S.crystalPose(state.template);
@@ -1210,17 +1222,35 @@
 
   function setAppMode(mode) {
     if (mode === "screen" && !(window.DOCKING_SCREENS || []).length) return;
+    stopAutoDock();
+    stopLabCheck();
+    stopRefine();
+    clearCpu();
     state.appMode = mode;
-    document.body.classList.toggle("mode-screen", mode === "screen");
+    document.body.classList.remove("mode-screen", "mode-lab");
+    if (mode !== "manual") document.body.classList.add("mode-" + mode);
     $("tabManual").classList.toggle("active", mode === "manual");
     $("tabScreen").classList.toggle("active", mode === "screen");
+    $("tabLab").classList.toggle("active", mode === "lab");
+    state.screen = null;
     if (mode === "screen") {
       startScreen(window.DOCKING_SCREENS[0]);
+    } else if (mode === "lab") {
+      if (lab.stage) {
+        applyStage(lab.stage);
+        state.candidates = lab.candidates;
+        buildCandidateCards("labCandidateList", false);
+        selectCandidate(0);
+      } else {
+        state.candidates = [];
+        state.candidate = null;
+      }
     } else {
-      stopAutoDock();
-      state.screen = null;
+      state.candidates = [];
+      state.candidate = null;
       loadStage(Math.max(0, state.stageIndex));
     }
+    updateJudgeVisibility();
   }
 
   function startScreen(screen) {
@@ -1237,12 +1267,12 @@
     $("screenQuestion").textContent = screen.question;
     $("screenNote").textContent = screen.note || "";
     $("screenResult").hidden = true;
-    buildCandidateCards();
+    buildCandidateCards("candidateList", true);
     selectCandidate(0);
   }
 
-  function buildCandidateCards() {
-    const list = $("candidateList");
+  function buildCandidateCards(listId, withPrediction) {
+    const list = $(listId);
     list.innerHTML = "";
     state.candidates.forEach((cand, index) => {
       const card = document.createElement("div");
@@ -1250,11 +1280,12 @@
       card.innerHTML =
         `<button type="button" class="cand-main"><span class="cand-name"></span><span class="cand-desc"></span></button>` +
         `<span class="cand-score">—</span>` +
-        `<label class="cand-predict"><input type="radio" name="prediction"> 予想</label>`;
+        (withPrediction ? `<label class="cand-predict"><input type="radio" name="prediction"> 予想</label>` : "");
       card.querySelector(".cand-name").textContent = cand.data.name;
       card.querySelector(".cand-desc").textContent = cand.data.desc;
       card.querySelector(".cand-main").addEventListener("click", () => selectCandidate(index));
-      card.querySelector("input").addEventListener("change", () => { state.prediction = cand.data.id; updateScreenButtons(); });
+      const radio = card.querySelector("input");
+      if (radio) radio.addEventListener("change", () => { state.prediction = cand.data.id; updateScreenButtons(); });
       cand.card = card;
       list.appendChild(card);
     });
@@ -1277,6 +1308,7 @@
     if (cand.bestPose) { state.pose = clonePose(cand.bestPose); syncTorsionControls(); }
     state.candidate = cand;
     state.candidates.forEach((c) => c.card.classList.toggle("active", c === cand));
+    updateJudgeVisibility();
     requestDraw();
   }
 
@@ -1287,7 +1319,17 @@
     cand.card.classList.toggle("docked", cand.docked);
   }
 
+  // 答え合わせは、結晶構造の正解がある分子のときだけ意味がある
+  function updateJudgeVisibility() {
+    const show = state.appMode === "manual" || (state.appMode === "lab" && state.template && state.template.hasAnswer);
+    $("judgeSection").hidden = !show;
+    const assist = $("assistAnswer");
+    if (assist) assist.disabled = !(state.template && state.template.hasAnswer);
+  }
+
   function updateScreenButtons() {
+    if (state.appMode === "lab") { updateLabButtons(); return; }
+    if (state.appMode !== "screen") return;
     const busy = !!state.autoJob;
     const allDocked = state.candidates.length > 0 && state.candidates.every((c) => c.docked);
     $("autoOne").disabled = busy;
@@ -1342,7 +1384,7 @@
           if (job.best.score > cand.bestRaw) { cand.bestRaw = job.best.score; cand.bestPose = clonePose(job.best.pose); }
         }
         syncTorsionControls();
-        $("screenProgress").textContent = "";
+        progressEl().textContent = "";
         requestDraw();
         updateCandidateCard(cand);
         updateScreenButtons();
@@ -1350,7 +1392,7 @@
         return;
       }
       state.pose = clonePose(job.pose);
-      $("screenProgress").textContent = `${cand.data.name} を自動ドッキング中…（${Math.min(job.trial, autoConfig.trials)} / ${autoConfig.trials} 回目の試行）`;
+      progressEl().textContent = `${cand.data.name} を自動ドッキング中…（${Math.min(job.trial, autoConfig.trials)} / ${autoConfig.trials} 回目の試行）`;
       requestDraw();
       job.handle = requestAnimationFrame(tick);
     };
@@ -1364,6 +1406,7 @@
       autoDock(i, () => next(i + 1));
     };
     next(0);
+    if (state.appMode === "lab") $("labRanking").hidden = true;
   }
 
   function stopAutoDock() {
@@ -1372,8 +1415,12 @@
     if (job.handle) cancelAnimationFrame(job.handle);
     job.cand.card.classList.remove("busy");
     state.autoJob = null;
-    $("screenProgress").textContent = "";
+    progressEl().textContent = "";
     updateScreenButtons();
+  }
+
+  function progressEl() {
+    return $(state.appMode === "lab" ? "labProgress" : "screenProgress");
   }
 
   function showScreenResult() {
@@ -1412,10 +1459,321 @@
     $("screenResult").scrollIntoView({ block: "nearest", behavior: "smooth" });
   }
 
+  // ---------- 研究室ツール（自分の構造で試す） ----------
+
+  const St = window.DockStructure;
+  const lab = { structure: null, fileName: "", groups: [], pocket: null, merged: [], stage: null, candidates: [], checkJob: null };
+  const checkConfig = { runs: 5, trials: 8, steps: 1800, frameMs: 12, decoyRmsd: 2.5 };
+
+  function labError(message) {
+    const el = $("labError");
+    el.textContent = message || "";
+    el.hidden = !message;
+  }
+
+  function readFileText(file) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result));
+      reader.onerror = () => reject(new Error("ファイルを読み込めませんでした。"));
+      reader.readAsText(file);
+    });
+  }
+
+  async function loadLabStructure(file) {
+    labError("");
+    $("labInfo").hidden = true;
+    $("labPocketWrap").hidden = true;
+    $("labDockSection").hidden = true;
+    $("labCheckSection").hidden = true;
+    try {
+      const text = await readFileText(file);
+      const parsed = St.parseStructure(file.name, text);
+      if (parsed.format === "sdf") {
+        throw new Error("これは化合物のファイルです。先にタンパク質の構造ファイル（PDB / mmCIF）を読み込んでください。");
+      }
+      lab.structure = parsed;
+      lab.fileName = file.name;
+      lab.groups = St.findLigandGroups(parsed.atoms);
+      lab.stage = null;
+      lab.candidates = [];
+      showLabInfo();
+      if (!lab.groups.length) {
+        labError("この構造には低分子が入っていません。研究室ツールは、結晶構造に入っている低分子の位置をポケットとして使うため、リガンドを含む構造が必要です。");
+        return;
+      }
+      buildPocketList();
+      $("labPocketWrap").hidden = false;
+    } catch (error) {
+      labError(error.message || String(error));
+    }
+  }
+
+  function showLabInfo() {
+    const atoms = lab.structure.atoms;
+    const chains = new Set(), residues = new Set();
+    let hetero = 0;
+    for (const a of atoms) {
+      chains.add(a.chain);
+      if (a.hetero) hetero++;
+      else residues.add(a.chain + ":" + a.resi);
+    }
+    const info = $("labInfo");
+    info.innerHTML =
+      `<strong>${escapeHtml(lab.fileName)}</strong><br>` +
+      `原子 ${atoms.length.toLocaleString()} 個（うち低分子など ${hetero.toLocaleString()} 個）／ 鎖 ${chains.size} 本 ／ アミノ酸 ${residues.size.toLocaleString()} 残基` +
+      (atoms.length > 40000 ? "<br>大きな構造なので、表示や計算に時間がかかることがあります。" : "");
+    info.hidden = false;
+  }
+
+  function escapeHtml(text) {
+    return String(text).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+  }
+
+  function buildPocketList() {
+    const list = $("labPocketList");
+    list.innerHTML = "";
+    lab.groups.slice(0, 24).forEach((group) => {
+      const card = document.createElement("div");
+      card.className = "candidate";
+      card.innerHTML = `<button type="button" class="pocket-row"><span class="cand-name"></span><span class="cand-desc"></span></button>`;
+      card.querySelector(".cand-name").textContent = group.label;
+      card.querySelector(".cand-desc").textContent =
+        `原子 ${group.count} 個` + (group.metal ? "・金属イオン" : "") +
+        (group.sugar ? "・糖鎖" : "") + (group.solvent ? "・結晶化に使う物質かもしれません" : "");
+      card.querySelector("button").addEventListener("click", () => choosePocket(group));
+      group.card = card;
+      list.appendChild(card);
+    });
+  }
+
+  function choosePocket(group) {
+    labError("");
+    const parsed = lab.structure;
+    // 金属イオンと、それに配位している小さなイオン（炭酸イオンなど）は 1 つの分子として扱う
+    const merged = St.nearbyGroups(lab.groups, group, 2.4).filter((g) => g.count <= 6 && !g.solvent);
+    const ligandSource = [...group.atoms, ...merged.flatMap((g) => g.atoms)];
+    const exclude = new Set(ligandSource);
+    const receptor = parsed.atoms.filter((a) => !exclude.has(a) && !["HOH", "DOD", "WAT"].includes(a.res));
+    if (receptor.length < 50) {
+      labError("まわりのタンパク質が少なすぎます。別の低分子を選んでください。");
+      return;
+    }
+    St.typeProtein(receptor);
+    const ligand = St.buildLigandFromAtoms(ligandSource);
+    lab.pocket = group;
+    lab.merged = merged;
+    const hideSelection = { or: [group, ...merged].map((g) => ({ chain: g.chain, resi: g.resi, resn: g.res })) };
+    const name = [group.res, ...merged.map((g) => g.res)].join(" + ");
+    lab.stage = {
+      id: "lab:" + lab.fileName + ":" + group.id,
+      title: `${name}（${lab.fileName}）`,
+      blurb: "",
+      proteinName: lab.fileName,
+      ligandName: name,
+      pdbId: "読み込んだファイル",
+      structureText: parsed.text,
+      structureFormat: parsed.format === "cif" ? "cif" : "pdb",
+      proteinAtoms: receptor,
+      ligand,
+      hideSelection,
+      successRmsd: ligand.atoms.length <= 8 ? 1.0 : 2.0,
+    };
+    applyStage(lab.stage);
+    lab.groups.forEach((g) => g.card && g.card.classList.toggle("active", g === group));
+
+    lab.candidates = [{
+      data: {
+        id: "crystal",
+        name: name + "（構造の中のリガンド）",
+        desc: merged.length ? "結晶構造にある低分子。まわりのイオンも一緒に扱います。" : "結晶構造にある低分子。正解の位置が分かります。",
+      },
+      template: state.template,
+      bestRaw: -Infinity, bestPose: null, docked: false,
+    }];
+    state.candidates = lab.candidates;
+    buildCandidateCards("labCandidateList", false);
+    selectCandidate(0);
+    $("labDockSection").hidden = false;
+    $("labCheckSection").hidden = false;
+    $("labRanking").hidden = true;
+    $("labCheckResult").hidden = true;
+  }
+
+  async function addLabLigands(files) {
+    labError("");
+    let added = 0;
+    for (const file of files) {
+      try {
+        const text = await readFileText(file);
+        const molecules = St.parseSdf(text);
+        if (!molecules.length) { labError(`${file.name} から分子を読み取れませんでした。SDF または MOL（V2000）に対応しています。`); continue; }
+        for (const mol of molecules) {
+          const ligand = St.buildLigandFromMolecule(mol);
+          if (ligand.atoms.length < 3) continue;
+          const template = S.makeTemplate(ligand);
+          template.hasAnswer = false;
+          lab.candidates.push({
+            data: { id: "sdf" + lab.candidates.length, name: mol.name || file.name, desc: `${file.name}・原子 ${ligand.atoms.length} 個・ねじれる結合 ${ligand.torsions.length} 本` },
+            template, bestRaw: -Infinity, bestPose: null, docked: false,
+          });
+          added++;
+        }
+      } catch (error) {
+        labError(error.message || String(error));
+      }
+    }
+    if (!added) return;
+    state.candidates = lab.candidates;
+    buildCandidateCards("labCandidateList", false);
+    selectCandidate(lab.candidates.length - 1);
+  }
+
+  function updateLabButtons() {
+    const busy = !!state.autoJob;
+    const ready = !!lab.stage;
+    $("labAutoOne").disabled = busy || !ready;
+    $("labAutoAll").disabled = busy || !ready;
+    $("labRank").disabled = busy || !ready || !lab.candidates.some((c) => c.docked);
+    $("labAddLigand").disabled = busy || !ready;
+    $("labCheck").disabled = busy || !ready || !!lab.checkJob;
+  }
+
+  function showLabRanking() {
+    const ranked = lab.candidates.filter((c) => c.bestRaw > -Infinity).sort((a, b) => b.bestRaw - a.bestRaw);
+    const list = $("labRanking");
+    list.innerHTML = "";
+    ranked.forEach((cand, i) => {
+      const points = toPoints(cand.bestRaw);
+      const row = document.createElement("li");
+      row.className = "rank-row";
+      row.innerHTML = `<div class="rank-head"><span class="rank-no"></span><span class="rank-name"></span><b class="rank-points"></b></div><div class="bar"><i></i></div>`;
+      row.querySelector(".rank-no").textContent = i + 1 + " 位";
+      row.querySelector(".rank-name").textContent = cand.data.name;
+      row.querySelector(".rank-points").textContent = points + " 点";
+      row.querySelector("i").style.width = points + "%";
+      list.appendChild(row);
+    });
+    list.hidden = !ranked.length;
+  }
+
+  // ---------- スコアがこの系で使えるかを調べる（再ドッキング検証） ----------
+
+  function startLabCheck() {
+    const tpl = state.stageTemplate;
+    if (lab.checkJob || !tpl || !tpl.hasAnswer) return;
+    const job = {
+      run: 0, trial: 0, step: checkConfig.steps,
+      pose: null, current: -Infinity,
+      trialBest: { score: -Infinity, pose: null },
+      runBest: -Infinity, decoyBest: -Infinity, beat: 0,
+      done: 0, total: checkConfig.runs * checkConfig.trials * checkConfig.steps,
+      handle: null,
+    };
+    lab.checkJob = job;
+    $("labCheckResult").hidden = true;
+    updateLabButtons();
+    const raw = (pose) => S.scorePose(state.grid, S.placeLigand(tpl, pose), tpl).raw;
+
+    const endTrial = () => {
+      if (!job.trialBest.pose) return;
+      const rmsd = S.rmsdToCrystal(tpl, S.placeLigand(tpl, job.trialBest.pose));
+      if (rmsd > checkConfig.decoyRmsd) job.decoyBest = Math.max(job.decoyBest, job.trialBest.score);
+      job.runBest = Math.max(job.runBest, job.trialBest.score);
+      job.trialBest = { score: -Infinity, pose: null };
+    };
+
+    const tick = () => {
+      const start = performance.now();
+      while (performance.now() - start < checkConfig.frameMs) {
+        if (job.step >= checkConfig.steps) {
+          endTrial();
+          if (job.trial >= checkConfig.trials) {
+            if (job.runBest > state.refRaw) job.beat++;
+            job.runBest = -Infinity;
+            job.trial = 0;
+            job.run++;
+            if (job.run >= checkConfig.runs) { finishLabCheck(job); return; }
+          }
+          job.trial++;
+          job.step = 0;
+          job.pose = {
+            R: S.axisAngleMatrix(gauss(), gauss(), gauss(), Math.random() * Math.PI * 2),
+            t: { x: state.pocketCenter.x + gauss() * 4, y: state.pocketCenter.y + gauss() * 4, z: state.pocketCenter.z + gauss() * 4 },
+            torsions: tpl.torsions.map(() => (Math.random() - 0.5) * Math.PI * 2),
+          };
+          job.current = raw(job.pose);
+        }
+        const progress = job.step / checkConfig.steps;
+        const candidate = perturbPose(job.pose, 0.3 + 1.2 * (1 - progress), true);
+        const score = raw(candidate);
+        if (score > job.current || Math.random() < Math.exp((score - job.current) / (1.5 * (1 - progress) + 0.02))) {
+          job.pose = candidate;
+          job.current = score;
+          if (score > job.trialBest.score) job.trialBest = { score, pose: clonePose(candidate) };
+        }
+        job.step++;
+        job.done++;
+      }
+      $("labCheckProgress").textContent = `調べています… ${Math.round((100 * job.done) / job.total)}%`;
+      job.handle = requestAnimationFrame(tick);
+    };
+    job.handle = requestAnimationFrame(tick);
+  }
+
+  function stopLabCheck() {
+    if (!lab.checkJob) return;
+    if (lab.checkJob.handle) cancelAnimationFrame(lab.checkJob.handle);
+    lab.checkJob = null;
+    $("labCheckProgress").textContent = "";
+    updateLabButtons();
+  }
+
+  function finishLabCheck(job) {
+    lab.checkJob = null;
+    $("labCheckProgress").textContent = "";
+    const decoy = job.decoyBest > -Infinity ? toPoints(job.decoyBest) : 0;
+    let verdict, note;
+    if (decoy >= 100) {
+      verdict = "この系では、スコアが正解を指していません";
+      note = "結晶構造と違う場所に、同じか高い点数が出ています。この系で点数の順位を比べても、結合の強さの目安にはなりません。ゲームのステージにも向きません。";
+    } else if (decoy >= 90) {
+      verdict = "きわどい系です";
+      note = "結晶構造と違う場所にも、近い点数が出ています。点数の差が小さいときは、結論を出さないでください。";
+    } else {
+      verdict = "この系では、スコアが正解を指しています";
+      note = "結晶構造のポーズがはっきり最高点になりました。ただし、よく似た分子どうしの小さな差を見分けられるかは、これとは別の問題です。";
+    }
+    $("labCheckVerdict").textContent = verdict;
+    $("labCheckDecoy").textContent = decoy + " 点";
+    $("labCheckBeat").textContent = `${job.beat} / ${checkConfig.runs} 回`;
+    $("labCheckNote").textContent = note;
+    $("labCheckResult").classList.toggle("success", decoy < 90);
+    $("labCheckResult").hidden = false;
+    updateLabButtons();
+  }
+
+  function bindLabEvents() {
+    const file = $("labFile");
+    $("labPick").addEventListener("click", () => file.click());
+    file.addEventListener("change", () => { if (file.files[0]) loadLabStructure(file.files[0]); file.value = ""; });
+    const drop = $("labDrop");
+    ["dragenter", "dragover"].forEach((t) => drop.addEventListener(t, (e) => { e.preventDefault(); drop.classList.add("over"); }));
+    ["dragleave", "drop"].forEach((t) => drop.addEventListener(t, (e) => { e.preventDefault(); drop.classList.remove("over"); }));
+    drop.addEventListener("drop", (e) => { if (e.dataTransfer.files[0]) loadLabStructure(e.dataTransfer.files[0]); });
+    const ligandFile = $("labLigandFile");
+    $("labAddLigand").addEventListener("click", () => ligandFile.click());
+    ligandFile.addEventListener("change", () => { if (ligandFile.files.length) addLabLigands(Array.from(ligandFile.files)); ligandFile.value = ""; });
+    $("labAutoOne").addEventListener("click", () => { if (state.candidate) autoDock(state.candidates.indexOf(state.candidate)); });
+    $("labAutoAll").addEventListener("click", autoDockAll);
+    $("labRank").addEventListener("click", showLabRanking);
+    $("labCheck").addEventListener("click", startLabCheck);
+  }
+
   // ---------- 答え合わせ ----------
 
   function judge() {
-    if (!state.currentScore) return;
+    if (!state.currentScore || !state.template.hasAnswer) return;
     stopTimer();
     const points = toPoints(state.currentScore.raw);
     const rmsd = S.rmsdToCrystal(state.template, state.currentPlaced);
@@ -1525,7 +1883,7 @@
   }
 
   // 動作確認用に内部状態を公開する
-  window.__dockingLab = { state, S, draw, judge, setMode, setLevel, sound, loadStage, setAppMode, autoConfig };
+  window.__dockingLab = { state, S, St, lab, draw, judge, setMode, setLevel, sound, loadStage, setAppMode, autoConfig, checkConfig, choosePocket, loadLabStructure };
 
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", init);
   else init();
