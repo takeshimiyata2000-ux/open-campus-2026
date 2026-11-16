@@ -1481,19 +1481,26 @@
   }
 
   async function loadLabStructure(file) {
+    try {
+      applyStructureText(file.name, await readFileText(file));
+    } catch (error) {
+      labError(error.message || String(error));
+    }
+  }
+
+  function applyStructureText(name, text) {
     labError("");
     $("labInfo").hidden = true;
     $("labPocketWrap").hidden = true;
     $("labDockSection").hidden = true;
     $("labCheckSection").hidden = true;
-    try {
-      const text = await readFileText(file);
-      const parsed = St.parseStructure(file.name, text);
+    {
+      const parsed = St.parseStructure(name, text);
       if (parsed.format === "sdf") {
         throw new Error("これは化合物のファイルです。先にタンパク質の構造ファイル（PDB / mmCIF）を読み込んでください。");
       }
       lab.structure = parsed;
-      lab.fileName = file.name;
+      lab.fileName = name;
       lab.groups = St.findLigandGroups(parsed.atoms);
       lab.stage = null;
       lab.candidates = [];
@@ -1504,8 +1511,107 @@
       }
       buildPocketList();
       $("labPocketWrap").hidden = false;
+    }
+  }
+
+  // ---------- ネットから取り寄せる ----------
+
+  // 3Dmol.js も同じ場所をブラウザから直接読み込んでいる
+  const SOURCES = {
+    rcsb: (id) => `https://files.rcsb.org/view/${id}.cif`,
+    pdbe: (id) => `https://www.ebi.ac.uk/pdbe/entry-files/download/${id.toLowerCase()}.cif`,
+    pubchemCid: (cid) => `https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/cid/${cid}/SDF?record_type=3d`,
+    pubchemName: (name) => `https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/name/${encodeURIComponent(name)}/SDF?record_type=3d`,
+  };
+
+  const OFFLINE_HINT = "ネットワークに届きませんでした。大学のネットワークの制限や、ページをファイルとして開いていることが原因かもしれません。サイトからファイルを保存して読み込んでください。";
+
+  async function fetchText(url) {
+    let response;
+    try {
+      response = await fetch(url);
+    } catch (error) {
+      const err = new Error(OFFLINE_HINT);
+      err.offline = true;
+      throw err;
+    }
+    if (response.status === 404) {
+      const err = new Error("見つかりませんでした。");
+      err.notFound = true;
+      throw err;
+    }
+    if (!response.ok) throw new Error(`取得できませんでした（${response.status}）。`);
+    return response.text();
+  }
+
+  function setFetchBusy(button, busy, label) {
+    button.disabled = busy;
+    button.textContent = busy ? "取得中…" : label;
+  }
+
+  async function fetchPdbEntry() {
+    const input = $("labPdbId");
+    const id = input.value.trim().toUpperCase().replace(/^PDB[:\s-]*/, "");
+    if (!/^[0-9][0-9A-Z]{3}$/.test(id)) {
+      labError("PDB ID は数字 1 文字＋英数字 3 文字です（例: 1AVD）。");
+      return;
+    }
+    labError("");
+    const button = $("labFetch");
+    setFetchBusy(button, true, "PDB から取得");
+    try {
+      // RCSB が届かないときのために、PDBe からも試す。
+      // 「その ID が無い」と言えるのは、本家の RCSB が 404 を返したときだけ
+      let text = null, lastError = null, missingAtRcsb = false;
+      for (const source of ["rcsb", "pdbe"]) {
+        try { text = await fetchText(SOURCES[source](id)); break; }
+        catch (error) {
+          lastError = error;
+          if (error.notFound && source === "rcsb") missingAtRcsb = true;
+        }
+      }
+      if (text == null) {
+        if (missingAtRcsb) throw new Error(`${id} という構造が見つかりませんでした。ID を確かめてください。`);
+        throw new Error(OFFLINE_HINT);
+      }
+      applyStructureText(id + ".cif", text);
+      input.value = "";
     } catch (error) {
       labError(error.message || String(error));
+    } finally {
+      setFetchBusy(button, false, "PDB から取得");
+    }
+  }
+
+  async function fetchCompound() {
+    const input = $("labCompound");
+    const query = input.value.trim();
+    if (!query) return;
+    labError("");
+    const button = $("labFetchCompound");
+    setFetchBusy(button, true, "PubChem から取得");
+    try {
+      const url = /^\d+$/.test(query) ? SOURCES.pubchemCid(query) : SOURCES.pubchemName(query);
+      let text;
+      try {
+        text = await fetchText(url);
+      } catch (error) {
+        if (error.notFound) {
+          throw new Error(`「${query}」の立体構造が PubChem に見つかりませんでした。英語名（例: estradiol）か CID を試してください。`);
+        }
+        throw error;
+      }
+      const molecules = St.parseSdf(text);
+      if (!molecules.length) throw new Error("取り寄せたデータから分子を読み取れませんでした。");
+      for (const mol of molecules) {
+        if (/^\d+$/.test(mol.name || "")) mol.name = `${query}（CID ${mol.name}）`;
+      }
+      addLigandMolecules(molecules, "PubChem");
+      input.value = "";
+    } catch (error) {
+      labError(error.message || String(error));
+    } finally {
+      setFetchBusy(button, false, "PubChem から取得");
     }
   }
 
@@ -1608,22 +1714,38 @@
         const text = await readFileText(file);
         const molecules = St.parseSdf(text);
         if (!molecules.length) { labError(`${file.name} から分子を読み取れませんでした。SDF または MOL（V2000）に対応しています。`); continue; }
-        for (const mol of molecules) {
-          const ligand = St.buildLigandFromMolecule(mol);
-          if (ligand.atoms.length < 3) continue;
-          const template = S.makeTemplate(ligand);
-          template.hasAnswer = false;
-          lab.candidates.push({
-            data: { id: "sdf" + lab.candidates.length, name: mol.name || file.name, desc: `${file.name}・原子 ${ligand.atoms.length} 個・ねじれる結合 ${ligand.torsions.length} 本` },
-            template, bestRaw: -Infinity, bestPose: null, docked: false,
-          });
-          added++;
-        }
+        added += addLigandMolecules(molecules, file.name, true);
       } catch (error) {
         labError(error.message || String(error));
       }
     }
-    if (!added) return;
+    if (added) refreshLabCandidates();
+  }
+
+  // 読み取った分子を、試す分子の一覧に加える
+  function addLigandMolecules(molecules, sourceLabel, deferRefresh) {
+    if (!lab.stage) { labError("先に構造ファイルを読み込んで、ポケットを選んでください。"); return 0; }
+    let added = 0;
+    for (const mol of molecules) {
+      const ligand = St.buildLigandFromMolecule(mol);
+      if (ligand.atoms.length < 3) continue;
+      const template = S.makeTemplate(ligand);
+      template.hasAnswer = false;
+      lab.candidates.push({
+        data: {
+          id: "sdf" + lab.candidates.length,
+          name: mol.name || sourceLabel,
+          desc: `${sourceLabel}・原子 ${ligand.atoms.length} 個・ねじれる結合 ${ligand.torsions.length} 本`,
+        },
+        template, bestRaw: -Infinity, bestPose: null, docked: false,
+      });
+      added++;
+    }
+    if (added && !deferRefresh) refreshLabCandidates();
+    return added;
+  }
+
+  function refreshLabCandidates() {
     state.candidates = lab.candidates;
     buildCandidateCards("labCandidateList", false);
     selectCandidate(lab.candidates.length - 1);
@@ -1636,6 +1758,7 @@
     $("labAutoAll").disabled = busy || !ready;
     $("labRank").disabled = busy || !ready || !lab.candidates.some((c) => c.docked);
     $("labAddLigand").disabled = busy || !ready;
+    $("labFetchCompound").disabled = busy || !ready;
     $("labCheck").disabled = busy || !ready || !!lab.checkJob;
   }
 
@@ -1768,6 +1891,10 @@
     $("labAutoAll").addEventListener("click", autoDockAll);
     $("labRank").addEventListener("click", showLabRanking);
     $("labCheck").addEventListener("click", startLabCheck);
+    $("labFetch").addEventListener("click", fetchPdbEntry);
+    $("labFetchCompound").addEventListener("click", fetchCompound);
+    $("labPdbId").addEventListener("keydown", (e) => { if (e.key === "Enter") fetchPdbEntry(); });
+    $("labCompound").addEventListener("keydown", (e) => { if (e.key === "Enter") fetchCompound(); });
   }
 
   // ---------- 答え合わせ ----------
@@ -1883,7 +2010,7 @@
   }
 
   // 動作確認用に内部状態を公開する
-  window.__dockingLab = { state, S, St, lab, draw, judge, setMode, setLevel, sound, loadStage, setAppMode, autoConfig, checkConfig, choosePocket, loadLabStructure };
+  window.__dockingLab = { state, S, St, lab, draw, judge, setMode, setLevel, sound, loadStage, setAppMode, autoConfig, checkConfig, choosePocket, loadLabStructure, applyStructureText, SOURCES };
 
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", init);
   else init();

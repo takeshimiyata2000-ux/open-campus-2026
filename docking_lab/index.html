@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
     <title>ドッキングラボ（試作版）</title>
-    <link rel="stylesheet" href="styles.css?v=10">
+    <link rel="stylesheet" href="styles.css?v=11">
   </head>
   <body>
     <main class="app">
@@ -72,6 +72,11 @@
             <button id="labPick" type="button">構造ファイルを選ぶ</button>
             <p class="help">PDB（.pdb）または mmCIF（.cif）。ここにドラッグしても読み込めます。</p>
           </div>
+          <div class="fetch-row">
+            <input id="labPdbId" type="text" placeholder="例: 1AVD" maxlength="10" autocomplete="off" spellcheck="false" aria-label="PDB ID">
+            <button id="labFetch" type="button">PDB から取得</button>
+          </div>
+          <p class="help">ファイルが手元になければ、PDB ID（4 文字）を入れると RCSB から直接読み込みます。</p>
           <p id="labError" class="lab-error" hidden></p>
           <div id="labInfo" class="lab-info" hidden></div>
           <div id="labPocketWrap" hidden>
@@ -85,6 +90,11 @@
           <h2>試す分子</h2>
           <div id="labCandidateList" class="candidates"></div>
           <input id="labLigandFile" type="file" accept=".sdf,.mol" multiple hidden>
+          <div class="fetch-row">
+            <input id="labCompound" type="text" placeholder="例: estradiol / 5757" autocomplete="off" spellcheck="false" aria-label="化合物名または PubChem CID">
+            <button id="labFetchCompound" type="button">PubChem から取得</button>
+          </div>
+          <p class="help">化合物の英語名か PubChem CID を入れると、立体構造つきの SDF を取り寄せます。</p>
           <div class="row">
             <button id="labAddLigand" type="button">化合物を追加（SDF / MOL）</button>
             <button id="labAutoOne" type="button">選んだ分子を自動ドッキング</button>
@@ -236,11 +246,11 @@
 
     <script src="3Dmol-min.js"></script>
     <script src="scoring.js?v=3"></script>
-    <script src="structure.js?v=1"></script>
+    <script src="structure.js?v=2"></script>
     <script src="data/avidin-biotin.js?v=2"></script>
     <script src="data/lactoferrin-iron.js?v=1"></script>
     <script src="data/estrogen-raloxifene.js?v=1"></script>
     <script src="data/screen-avidin.js?v=1"></script>
-    <script src="app.js?v=11"></script>
+    <script src="app.js?v=12"></script>
   </body>
 </html>

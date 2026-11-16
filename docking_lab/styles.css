@@ -461,3 +461,17 @@ body.mode-screen .manual-only, body.mode-lab .manual-only { display: none !impor
 .pocket-row .cand-desc { font-size: 11px; }
 #labRanking { margin-top: 10px; }
 #labRanking .rank-row .bar i { background: var(--accent); }
+
+.fetch-row { display: grid; grid-template-columns: 1fr auto; gap: 6px; margin-top: 10px; }
+.fetch-row input {
+  font: inherit;
+  font-size: 13px;
+  color: var(--text);
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 9px 10px;
+  min-width: 0;
+}
+.fetch-row input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.fetch-row button { white-space: nowrap; font-size: 13px; }
