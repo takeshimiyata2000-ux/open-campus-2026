@@ -397,6 +397,7 @@ button:disabled { opacity: 0.4; cursor: not-allowed; }
 body.mode-screen .screen-only { display: block; }
 body.mode-lab .lab-only { display: block; }
 body.mode-screen .manual-only, body.mode-lab .manual-only { display: none !important; }
+body.mode-screen .no-screen { display: none !important; }
 
 /* スクリーニング */
 .candidates { display: grid; gap: 6px; margin: 10px 0; }
@@ -475,3 +476,6 @@ body.mode-screen .manual-only, body.mode-lab .manual-only { display: none !impor
 }
 .fetch-row input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .fetch-row button { white-space: nowrap; font-size: 13px; }
+
+.hint-text { color: var(--accent); font-size: 12px; line-height: 1.6; margin-top: 8px; min-height: 1.2em; }
+.wide { width: 100%; }

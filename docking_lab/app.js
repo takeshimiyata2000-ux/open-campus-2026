@@ -55,6 +55,9 @@
     wasClashing: false,
     torsionMarkers: [],
     clashPoints: [],
+    hintLevel: 0,
+    hints: null,
+    hintLabels: [],
     assisted: false, // おたすけ機能を使ったか（使った回は自己ベストに記録しない）
     refineHandle: null,
     cpu: null, // コンピュータの探索の状態
@@ -235,6 +238,8 @@
     state.refRaw = ref.raw;
     state.refParts = ref.parts;
 
+    computeHints();
+
     // 金属を含むステージだけ、配位結合の表示を出す
     document.querySelectorAll(".metal-only").forEach((el) => (el.hidden = !state.hasMetal));
     const canFlex = state.template.torsions.length > 0;
@@ -255,6 +260,7 @@
     viewer.removeAllLabels();
     if (typeof viewer.removeAllSurfaces === "function") viewer.removeAllSurfaces();
     state.labels.clear();
+    state.hintLabels = [];
     state.surface = null;
     $("surfaceButton").textContent = "表面を表示";
 
@@ -371,6 +377,7 @@
     state.wasClashing = false;
     state.userDriven = false;
     state.assisted = false;
+    setHintLevel(0);
     stopRefine();
     clearCpu();
     stopAutoDock();
@@ -407,7 +414,17 @@
 
     viewer.removeAllShapes();
 
-    if (state.showAnswer && tpl.hasAnswer) drawMolecule(viewer, tpl.crystal, tpl.bonds, { color: "0x3ddc84", alpha: 0.55, scale: 0.85 });
+    // 緑の分子: 答え合わせのときは自分の分子の正解、ヒントのときはポケット本来のリガンド
+    const reference = state.showAnswer && tpl.hasAnswer ? tpl : state.hintLevel >= 3 ? state.stageTemplate : null;
+    if (reference) drawMolecule(viewer, reference.crystal, reference.bonds, { color: "0x3ddc84", alpha: 0.55, scale: 0.85 });
+    if (state.hintLevel >= 1 && state.hints) {
+      viewer.addSphere({ center: state.hints.center, radius: 3.0, color: "0xf3b23c", alpha: 0.13 });
+    }
+    if (state.hintLevel >= 2 && state.hints) {
+      for (const r of state.hints.residues) {
+        viewer.addSphere({ center: { x: r.p.x, y: r.p.y, z: r.p.z }, radius: 0.5, color: "0xf3b23c", alpha: 0.85 });
+      }
+    }
     drawMolecule(viewer, placed, tpl.bonds, { highlightTorsion: state.activeTorsion, markTorsions: state.level === "flex" });
 
     // 水素結合（緑の点線）
@@ -680,6 +697,7 @@
     $("judgeButton").addEventListener("click", judge);
     $("surfaceButton").addEventListener("click", toggleSurface);
     $("soundButton").addEventListener("click", toggleSound);
+    $("hintButton").addEventListener("click", nextHint);
     $("assistNear").addEventListener("click", assistNear);
     $("assistRefine").addEventListener("click", assistRefine);
     $("assistAnswer").addEventListener("click", assistAnswer);
@@ -979,11 +997,20 @@
 
   // 答えの場所へ運ぶ
   function assistAnswer() {
-    if (!state.template.hasAnswer) return;
     stopRefine();
     markAssisted();
-    state.pose = S.crystalPose(state.template);
-    syncTorsionControls();
+    if (state.template.hasAnswer) {
+      state.pose = S.crystalPose(state.template);
+      syncTorsionControls();
+    } else {
+      // 正解のない分子は、短い自動ドッキングでポケットに入れてみる
+      const index = state.candidates.indexOf(state.candidate);
+      if (index >= 0) {
+        autoDock(index, null, { trials: 5, steps: 1500, frameMs: autoConfig.frameMs });
+        return;
+      }
+      state.pose.t = { ...state.pocketCenter };
+    }
     state.userDriven = true;
     requestDraw();
   }
@@ -1308,6 +1335,7 @@
     if (cand.bestPose) { state.pose = clonePose(cand.bestPose); syncTorsionControls(); }
     state.candidate = cand;
     state.candidates.forEach((c) => c.card.classList.toggle("active", c === cand));
+    setHintLevel(0);
     updateJudgeVisibility();
     requestDraw();
   }
@@ -1324,7 +1352,7 @@
     const show = state.appMode === "manual" || (state.appMode === "lab" && state.template && state.template.hasAnswer);
     $("judgeSection").hidden = !show;
     const assist = $("assistAnswer");
-    if (assist) assist.disabled = !(state.template && state.template.hasAnswer);
+    if (assist) assist.textContent = state.template && state.template.hasAnswer ? "答えの場所へ" : "ポケットに入れる";
   }
 
   function updateScreenButtons() {
@@ -1342,20 +1370,21 @@
   }
 
   // 候補 1 つを自動ドッキングする。終わったら done を呼ぶ
-  function autoDock(index, done) {
-    selectCandidate(index);
+  function autoDock(index, done, config) {
+    const budget = config || autoConfig;
+    if (state.candidate !== state.candidates[index]) selectCandidate(index);
     const cand = state.candidates[index];
     const tpl = cand.template;
-    const job = { cand, trial: 0, step: autoConfig.steps, pose: null, current: -Infinity, best: { pose: null, score: -Infinity }, handle: null, done };
+    const job = { cand, trial: 0, step: budget.steps, pose: null, current: -Infinity, best: { pose: null, score: -Infinity }, handle: null, done };
     state.autoJob = job;
     updateScreenButtons();
     cand.card.classList.add("busy");
     const tick = () => {
       const t0 = performance.now();
       let finished = false;
-      while (performance.now() - t0 < autoConfig.frameMs) {
-        if (job.step >= autoConfig.steps) {
-          if (job.trial >= autoConfig.trials) { finished = true; break; }
+      while (performance.now() - t0 < budget.frameMs) {
+        if (job.step >= budget.steps) {
+          if (job.trial >= budget.trials) { finished = true; break; }
           job.trial++;
           job.step = 0;
           job.pose = {
@@ -1365,7 +1394,7 @@
           };
           job.current = rawScore(job.pose);
         }
-        const progress = job.step / autoConfig.steps;
+        const progress = job.step / budget.steps;
         const candidate = perturbPose(job.pose, 0.3 + 1.2 * (1 - progress), true);
         const sc = rawScore(candidate);
         if (sc > job.current || Math.random() < Math.exp((sc - job.current) / (1.5 * (1 - progress) + 0.02))) {
@@ -1392,7 +1421,7 @@
         return;
       }
       state.pose = clonePose(job.pose);
-      progressEl().textContent = `${cand.data.name} を自動ドッキング中…（${Math.min(job.trial, autoConfig.trials)} / ${autoConfig.trials} 回目の試行）`;
+      progressEl().textContent = `${cand.data.name} を自動ドッキング中…（${Math.min(job.trial, budget.trials)} / ${budget.trials} 回目の試行）`;
       requestDraw();
       job.handle = requestAnimationFrame(tick);
     };
@@ -1457,6 +1486,68 @@
     sound.unlock();
     sound.judge(correct ? "success" : "far");
     $("screenResult").scrollIntoView({ block: "nearest", behavior: "smooth" });
+  }
+
+  // ---------- ヒント ----------
+  // 1: ポケットの位置、2: 鍵になるアミノ酸、3: 本来のリガンドの形
+
+  function computeHints() {
+    state.hints = null;
+    setHintLevel(0);
+    const tpl = state.stageTemplate;
+    if (!tpl || !tpl.hasAnswer) return;
+    const placed = S.placeLigand(tpl, S.crystalPose(tpl));
+    const score = S.scorePose(state.grid, placed, tpl);
+    const byResidue = new Map();
+    for (const bond of score.hbonds.concat(score.metalBonds || [])) {
+      const key = bond.p.chain + ":" + bond.p.resi;
+      const entry = byResidue.get(key) || { p: bond.p, strength: 0 };
+      entry.strength += bond.strength;
+      byResidue.set(key, entry);
+    }
+    const residues = Array.from(byResidue.values()).sort((a, b) => b.strength - a.strength).slice(0, 5);
+    state.hints = { center: tpl.center, residues };
+  }
+
+  function nextHint() {
+    if (!state.hints) return;
+    setHintLevel(state.hintLevel >= 3 ? 0 : state.hintLevel + 1);
+    if (state.hintLevel > 0) markAssisted();
+    requestDraw();
+  }
+
+  function setHintLevel(level) {
+    state.hintLevel = level;
+    const button = $("hintButton");
+    const available = !!state.hints;
+    button.disabled = !available;
+    button.textContent = level >= 3 ? "ヒントを消す" : `ヒントを見る（${level + 1} / 3）`;
+    const names = state.hints ? state.hints.residues.map((r) => residueName(r.p.res) + r.p.resi).join("、") : "";
+    const ownAnswer = state.template && state.template.hasAnswer;
+    const texts = [
+      available ? "" : "この分子には正解の位置がないので、ヒントは出せません。",
+      "うすい黄色の球が、低分子の真ん中が来るあたりです。まずはここを目指してください。",
+      `鍵になるアミノ酸を黄色の点で示しました: ${names}。これらと水素結合を作れる向きを探してください。`,
+      ownAnswer ? "正解の形を緑で重ねました。" : "このポケットに本来入っている分子を緑で重ねました。自分の分子を、これに近い形で置いてみてください。",
+    ];
+    $("hintText").textContent = texts[level];
+    updateHintLabels();
+  }
+
+  function updateHintLabels() {
+    if (!state.viewer) return;
+    for (const label of state.hintLabels) state.viewer.removeLabel(label);
+    state.hintLabels = [];
+    if (state.hintLevel >= 2 && state.hints) {
+      for (const r of state.hints.residues) {
+        state.hintLabels.push(state.viewer.addLabel(residueName(r.p.res) + r.p.resi, {
+          position: { x: r.p.x, y: r.p.y, z: r.p.z },
+          fontColor: "#1a1304", fontSize: 12,
+          backgroundColor: "0xf3b23c", backgroundOpacity: 0.9,
+          borderThickness: 0, inFront: true, alignment: "topCenter",
+        }));
+      }
+    }
   }
 
   // ---------- 研究室ツール（自分の構造で試す） ----------
@@ -2010,7 +2101,7 @@
   }
 
   // 動作確認用に内部状態を公開する
-  window.__dockingLab = { state, S, St, lab, draw, judge, setMode, setLevel, sound, loadStage, setAppMode, autoConfig, checkConfig, choosePocket, loadLabStructure, applyStructureText, SOURCES };
+  window.__dockingLab = { state, S, St, lab, draw, judge, nextHint, setHintLevel, setMode, setLevel, sound, loadStage, setAppMode, autoConfig, checkConfig, choosePocket, loadLabStructure, applyStructureText, SOURCES };
 
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", init);
   else init();

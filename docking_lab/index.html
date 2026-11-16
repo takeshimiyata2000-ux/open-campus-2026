@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
     <title>ドッキングラボ（試作版）</title>
-    <link rel="stylesheet" href="styles.css?v=11">
+    <link rel="stylesheet" href="styles.css?v=13">
   </head>
   <body>
     <main class="app">
@@ -170,14 +170,20 @@
           </div>
         </section>
 
-        <section class="manual-only">
+        <section class="no-screen">
+          <h2>ヒント</h2>
+          <button id="hintButton" class="wide" type="button">ヒントを見る（1 / 3）</button>
+          <p id="hintText" class="hint-text"></p>
+        </section>
+
+        <section class="no-screen">
           <h2>おたすけ</h2>
           <div class="assist">
             <button id="assistNear" type="button">近くへ移動</button>
             <button id="assistRefine" type="button">自動で微調整</button>
             <button id="assistAnswer" type="button">答えの場所へ</button>
           </div>
-          <p class="help">「自動で微調整」は、今の場所から点数が上がる方向へ少しずつ動かします。おたすけを使った回は、自己ベストには記録されません。</p>
+          <p class="help">「自動で微調整」は、今の場所から点数が上がる方向へ少しずつ動かします。ヒントやおたすけを使った回は、自己ベストには記録されません。</p>
         </section>
 
         <section id="torsionSection" hidden>
@@ -251,6 +257,6 @@
     <script src="data/lactoferrin-iron.js?v=1"></script>
     <script src="data/estrogen-raloxifene.js?v=1"></script>
     <script src="data/screen-avidin.js?v=1"></script>
-    <script src="app.js?v=12"></script>
+    <script src="app.js?v=14"></script>
   </body>
 </html>
